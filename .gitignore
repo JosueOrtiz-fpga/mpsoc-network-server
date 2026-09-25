@@ -1,3 +1,4 @@
 # Vivado build output
 build/
 out/
+temp/
