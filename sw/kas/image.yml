@@ -1,0 +1,20 @@
+# sw/kas/image.yml - EDF Linux disk image for Zynq UltraScale+ CG/DR devices
+# Use as: kas build sw/kas/base.yml:sw/kas/image.yml
+#
+# amd-cortexa53-common is AMD's generic machine for ZynqMP parts without a Mali
+# GPU (the ZU1CG is one). Board specifics reach Linux through the device tree
+# that U-Boot hands over, and that tree lives in BOOT.BIN (bootbin.yml).
+
+header:
+  version: 14
+
+machine: amd-cortexa53-common
+
+target:
+  - edf-linux-disk-image
+  - wic-tools              # native tools for `wic cp` when assembling the SD image
+
+local_conf_header:
+  10-image: |
+    # rootfs tarball for NFS root on the HIL bench
+    IMAGE_FSTYPES:append:pn-edf-linux-disk-image = " tar.gz"

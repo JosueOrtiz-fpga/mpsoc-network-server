@@ -1,0 +1,20 @@
+# sw/kas/bootbin.yml - board boot firmware: BOOT.BIN (PMUFW, FSBL, TF-A, U-Boot, system.dtb)
+# Use as: kas build sw/kas/base.yml:sw/kas/bootbin.yml
+#
+# The machine comes from platform/machine (make platform). Its device tree is
+# the board-specific one; the disk image in image.yml stays generic.
+
+header:
+  version: 14
+
+machine: zynqmp-zub1cg-sdt
+
+target:
+  - xilinx-bootbin
+
+local_conf_header:
+  10-bootbin: |
+    # What gen-machine-conf would have put into local.conf (BBMULTICONFIG for the
+    # FSBL/PMUFW baremetal builds, ...). Generated and committed under
+    # platform/machine/conf/, found through BBPATH.
+    include conf/zub1cg-gmc.conf
