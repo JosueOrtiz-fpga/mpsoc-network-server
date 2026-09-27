@@ -49,9 +49,12 @@ if [ "${PLATFORM_PS_ONLY:-1}" = 1 ] && [ -f "$work/sdt/pl.dtsi" ]; then
 EOF
 fi
 
-# Scrub host-specific strings (scratch path, XSA file name with its git sha).
+# Scrub host-specific strings (scratch path, XSA file name with its git sha) so
+# that platform-check only reports real PS changes. Usually nothing matches:
+# grep then exits 1, which must not abort the script under `set -e -o pipefail`.
 xsa_base=$(basename "$xsa")
-grep -rlIF -e "$work" -e "$xsa_base" "$work/sdt" 2>/dev/null | while IFS= read -r f; do
+{ grep -rlIF -e "$work" -e "$xsa_base" "$work/sdt" || true; } | while IFS= read -r f; do
+  echo "gen-sdt: scrubbing host-specific strings in ${f#"$work"/sdt/}"
   W="$work/sdt" X="$xsa_base" perl -pi -e 's/\Q$ENV{W}\E/./g; s/\Q$ENV{X}\E/system.xsa/g' "$f"
 done
 
