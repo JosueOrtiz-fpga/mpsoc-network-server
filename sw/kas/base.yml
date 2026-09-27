@@ -18,7 +18,7 @@ machine: amd-cortexa53-common     # overridden by bootbin.yml
 
 defaults:
   repos:
-    branch: rel-v2025.2
+    branch: rel-v2026.1
 
 repos:
   # This repository.

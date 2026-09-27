@@ -148,6 +148,8 @@ Keep comments in `versions.env` on their own lines: `make` would otherwise inclu
 - Vivado 2026.1 on `PATH` (`source <install>/2026.1/Vivado/settings64.sh`); this also provides `bootgen`
 - ZUBoard 1CG board files installed for that Vivado version
 - Optional: Verilator for `make hw-lint`
+- KAS scripts: ```git clone --branch 5.4 https://github.com/siemens/kas.git ~/.local/src/kas; sudo ln -s ~/.local/src/kas/kas-container /usr/local/bin/kas-container``` 
+- Docker ```curl -fsSL https://get.docker.com | sh; sudo usermod -aG docker $USER; newgrp docker```
 
 ### Hardware targets (implemented)
 
