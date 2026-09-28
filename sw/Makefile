@@ -6,7 +6,9 @@
 # Called from the top-level Makefile (make -C sw <target>) or directly.
 # Targets:
 #   platform-sdt      XSA -> platform/sdt            (needs Vivado: SDTGen runs on HSI)
-#   platform-machine  platform/sdt -> platform/machine (inside kas)
+#   pl-sdt
+#	pl-overlay
+#	platform-machine  platform/sdt -> platform/machine (inside kas)
 #   platform          both of the above
 #   platform-check    regenerate platform/ and fail if it differs from git
 #   sw-image          BOOT.BIN + Linux artifacts into out/sw/
@@ -65,7 +67,8 @@ COLLECT := bash $(REPO_IN)/sw/scripts/collect-artifacts.sh $(REPO_IN)/$(OUT_REL)
            $(BOOT_MACHINE) $(IMAGE_MACHINE) $(IMAGE)
 
 .PHONY: platform platform-sdt platform-machine platform-check \
-        sw-image sw-sdk sw-lock sw-shell check-versions kas-dirs
+        sw-image sw-sdk sw-lock sw-shell check-versions kas-dirs \
+		pl-sdt pl-overlay
 
 # ---- sanity -----------------------------------------------------------------
 check-versions:
