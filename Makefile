@@ -16,7 +16,7 @@ help:
 	@echo "  make hw-project   Recreate the throwaway Vivado project under build/hw"
 	@echo "  make hw-bit       Synthesis + implementation + bitstream (fails on timing)"
 	@echo "  make hw-xsa       Export versioned XSA to out/hw (+ system.xsa link)"
-	@echo "  make hw-plpkg     Bitstream -> .bit.bin for Linux FPGA Manager"
+	@echo "  make hw-plpkg     Bitstream -> .bit.bin + device-tree overlay (.dtbo) for FPGA Manager."
 	@echo "  make hw-wrapper   Regenerate hw/rtl/<bd>_wrapper.v after BD port changes"
 	@echo "  make hw-clean     Remove build/hw and out/hw"
 	@echo ""
@@ -28,11 +28,17 @@ hw-sim:     ; @$(HW_MAKE) sim
 hw-project: ; @$(HW_MAKE) project
 hw-bit:     ; @$(HW_MAKE) bit
 hw-xsa:     ; @$(HW_MAKE) xsa
-hw-plpkg:   ; @$(HW_MAKE) plpkg
 hw-wrapper: ; @$(HW_MAKE) wrapper
 hw-clean:   ; @$(HW_MAKE) clean
 
 platform platform-sdt platform-machine platform-check sw-image sw-sdk sw-lock sw-shell:
 	$(MAKE) -C sw $@
+
+hw-plpkg:
+	@$(HW_MAKE) plpkg
+	@$(MAKE) -C sw pl-overlay
+	@for d in out/hw/pl/*.dtbo; do \
+	  [ -f "$${d%.dtbo}.bit.bin" ] || { echo "ERROR: $$d has no matching .bit.bin (XSA and bitstream from different builds?)"; exit 1; }; \
+	done; echo "PL package:"; ls -1 out/hw/pl
 
 clean: hw-clean

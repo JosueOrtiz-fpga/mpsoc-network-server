@@ -7,8 +7,8 @@
 # on Zynq UltraScale+. bootgen ships with Vivado/Vitis (and is also
 # available as open source from github.com/Xilinx/bootgen).
 #
-# TODO: add the matching device-tree overlay (.dtbo), generated from the
-# XSA via the SDTGen/Lopper flow once the platform stage exists.
+# The matching device-tree overlay (.dtbo) is produced by sw/scripts/gen-pl-overlay.sh
+# (make -C sw pl-overlay); the top-level 'make hw-plpkg' runs both.
 
 set -euo pipefail
 

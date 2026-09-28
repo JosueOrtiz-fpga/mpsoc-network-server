@@ -15,4 +15,13 @@ file mkdir [file dirname $xsa_file]
 write_hw_platform -fixed -include_bit -force -file $xsa_file
 puts "INFO: XSA written to $xsa_file"
 
+# The same bitstream the XSA embeds, named after the XSA: that is the name the
+# PL overlay's firmware-name uses. hw-plpkg builds the .bit.bin from this copy.
+set top     [env_or TOP [get_property top [current_fileset]]]
+set run_bit [file join [get_property DIRECTORY [get_runs impl_1]] ${top}.bit]
+if {![file exists $run_bit]} { error "bitstream not found: $run_bit" }
+set xsa_bit "[file rootname $xsa_file].bit"
+file copy -force $run_bit $xsa_bit
+puts "INFO: bitstream copied to $xsa_bit"
+
 close_project

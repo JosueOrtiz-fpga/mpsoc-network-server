@@ -6,7 +6,9 @@
 # Called from the top-level Makefile (make -C sw <target>) or directly.
 # Targets:
 #   platform-sdt      XSA -> platform/sdt            (needs Vivado: SDTGen runs on HSI)
-#   platform-machine  platform/sdt -> platform/machine (inside kas)
+#   pl-sdt
+#	pl-overlay
+#	platform-machine  platform/sdt -> platform/machine (inside kas)
 #   platform          both of the above
 #   platform-check    regenerate platform/ and fail if it differs from git
 #   sw-image          BOOT.BIN + Linux artifacts into out/sw/
@@ -65,7 +67,8 @@ COLLECT := bash $(REPO_IN)/sw/scripts/collect-artifacts.sh $(REPO_IN)/$(OUT_REL)
            $(BOOT_MACHINE) $(IMAGE_MACHINE) $(IMAGE)
 
 .PHONY: platform platform-sdt platform-machine platform-check \
-        sw-image sw-sdk sw-lock sw-shell check-versions kas-dirs
+        sw-image sw-sdk sw-lock sw-shell check-versions kas-dirs \
+		pl-sdt pl-overlay
 
 # ---- sanity -----------------------------------------------------------------
 check-versions:
@@ -96,6 +99,19 @@ platform-check: platform
 	  exit 1; \
 	fi
 	@echo "platform/ matches the committed copy."
+
+# ---- PL overlay for the runtime PL package (make hw-plpkg) ----------------------
+PL_SDT_DIR := $(ROOT)/out/hw/sdt-full
+PL_OUT_REL := out/hw/pl
+
+pl-sdt:
+	@test -n "$(XSA)" || { echo "ERROR: no XSA in out/hw - run 'make hw-xsa' first"; exit 1; }
+	@echo "SDTGen (full, with PL): $(XSA)"
+	$(VIVADO_RUN) env PLATFORM_PS_ONLY=0 $(ROOT)/sw/scripts/gen-sdt.sh "$(XSA)" "$(PL_SDT_DIR)" "$(BOARD_DTSI)"
+
+pl-overlay: pl-sdt check-versions kas-dirs
+	cd $(ROOT) && $(KAS) shell $(KAS_IMAGE) \
+	  -c 'bash $(REPO_IN)/sw/scripts/gen-pl-overlay.sh $(REPO_IN)/out/hw/sdt-full $(REPO_IN)/$(PL_OUT_REL)'
 
 # ---- images -----------------------------------------------------------------
 sw-image: check-versions kas-dirs
