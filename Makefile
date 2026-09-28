@@ -32,8 +32,7 @@ hw-plpkg:   ; @$(HW_MAKE) plpkg
 hw-wrapper: ; @$(HW_MAKE) wrapper
 hw-clean:   ; @$(HW_MAKE) clean
 
-platform platform-check sw-image sw-sdk hil:
-	@echo "$@: not implemented yet (see README, 'Open decisions and TODO')"
-	@exit 1
+platform platform-sdt platform-machine platform-check sw-image sw-sdk sw-lock sw-shell:
+	$(MAKE) -C sw $@
 
 clean: hw-clean

@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: MIT
+/*
+ * Avnet ZUBoard 1CG (AES-ZUB-1CG-DK-G), PCB rev 1 - board-level device tree.
+ *
+ * Fed to SDTGen with -user_dts (sw/scripts/gen-sdt.sh), which copies it into
+ * platform/sdt and includes it from system-top.dts after the PS configuration
+ * (pcw.dtsi), so it only adds what the XSA cannot know: parts on the board.
+ * Lopper then carries it into the Linux/U-Boot system.dtb inside BOOT.BIN.
+ *
+ * Sources: ZUBoard 1CG HW User Guide v1.0; schematic SCH-ZUB-1CG rev 1
+ * (sheet 5 "QSPI, uSD, and Voltage Translation", sheet 7 "Gigabit Ethernet PHY").
+ *
+ * Console: UART0 on MIO10/11 -> FT2232H on J16 (ttyPS0, 115200). SDTGen sets
+ * serial0/stdout-path from the PS configuration, so nothing is needed here.
+ */
+
+#include "include/dt-bindings/gpio/gpio.h"
+
+/ {
+	model = "Avnet ZUBoard 1CG";
+	compatible = "avnet,zub1cg", "xlnx,zynqmp";
+};
+
+/*
+ * Ethernet: GEM2 (RGMII on MIO52-63, MDC/MDIO on MIO76/77) to a Microchip
+ * KSZ9131RNX (U32).
+ * PHY address straps: PHYAD2 (RX_CLK, R218), PHYAD1 (LED2, R94) and PHYAD0
+ * (LED1, R247) are pulled up, pull-downs DNP -> address 7 (sheet 7 note "(00)111").
+ * Delays: GEM adds none; the KSZ9131 driver applies internal RX/TX delays for
+ * "rgmii-id" (CONFIG_MICREL_PHY / CONFIG_PHY_MICREL_KSZ90X1).
+ */
+&gem2 {
+	phy-mode = "rgmii-id";
+	phy-handle = <&phy0>;
+
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * ETH_RST_N = MIO12 AND POWER_GOOD (U15), with a pull-up (R316) on the
+		 * MIO12 side, so the PHY is out of reset even before Linux runs.
+		 * Linux pulses it once when the MDIO bus registers.
+		 */
+		reset-gpios = <&gpio 12 GPIO_ACTIVE_LOW>;
+		reset-delay-us = <10000>;
+		reset-post-delay-us = <5000>;
+
+		phy0: ethernet-phy@7 {
+			reg = <7>;
+		};
+	};
+};
+
+/*
+ * I2C1 (MIO8/9): AT24MAC602 (U7). A2..A0 straps: pull-downs R43/R44/R48/R52
+ * fitted, pull-ups DNP -> EEPROM at 0x50, EUI page at 0x58 (sheet 7 note).
+ * The AT24MAC602 carries an EUI-64, not an EUI-48, so turning it into the
+ * GEM2 MAC address needs a policy; see sw/meta-zub1cg/README.md.
+ */
+&i2c1 {
+	clock-frequency = <400000>;
+
+	eeprom@50 {
+		compatible = "atmel,24c02";
+		reg = <0x50>;
+		pagesize = <16>;
+	};
+
+	eeprom_eui: eeprom@58 {
+		compatible = "atmel,24mac602";
+		reg = <0x58>;
+		read-only;
+	};
+};
+
+/*
+ * microSD on SD1 (MIO45-51) through a PI4ULS3V4857 translator (U20).
+ * Its SEL pin is tied low (R113 fitted, pull-up R112 DNP) and nothing drives
+ * it, so the card side stays at 3.3 V and UHS 1.8 V signalling cannot work.
+ * Card detect uses the controller's own CD input (MIO45). There is no WP.
+ */
+&sdhci1 {
+	no-1-8-v;
+	disable-wp;
+};
+
+/* QSPI (MIO0-5): ISSI IS25WP256E (U10), 32 MB, quad I/O. */
+&qspi {
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		spi-tx-bus-width = <4>;
+		spi-rx-bus-width = <4>;
+		spi-max-frequency = <50000000>;
+	};
+};
+
+/*
+ * Not described yet (see sw/meta-zub1cg/README.md): USB1 via USB3320 ULPI PHY
+ * and USB5744 hub, power button (MIO26) and power kill (MIO34) handling,
+ * user LEDs and switches on MIO.
+ */

@@ -1,0 +1,109 @@
+# Always first in a chain:  kas build sw/kas/base.yml:sw/kas/bootbin.yml
+#                           kas build sw/kas/base.yml:sw/kas/image.yml
+# Pinning: `make sw-lock` writes base.lock.yml next to this file; commit it.
+# kas then applies it automatically, so every build is reproducible from a git hash.
+#
+# The branch below must match EDF_RELEASE in versions.env (make check-versions).
+
+header:
+  version: 14
+
+distro: amd-edf
+machine: amd-cortexa53-common     # overridden by bootbin.yml
+
+defaults:
+  repos:
+    branch: rel-v2026.1
+
+repos:
+  # This repository.
+  zub1cg-project:
+    layers:
+      sw/meta-zub1cg:
+      platform/machine:
+
+  poky:
+    url: https://github.com/Xilinx/poky.git
+    path: layers/poky
+    layers:
+      meta:
+      meta-poky:
+
+  meta-openembedded:
+    url: https://github.com/Xilinx/meta-openembedded.git
+    path: layers/meta-openembedded
+    layers:
+      meta-oe:
+      meta-python:
+      meta-networking:
+      meta-filesystems:
+      meta-perl:
+
+  meta-arm:
+    url: https://github.com/Xilinx/meta-arm.git
+    path: layers/meta-arm
+    layers:
+      meta-arm:
+      meta-arm-toolchain:
+
+  meta-security:
+    url: https://github.com/Xilinx/meta-security.git
+    path: layers/meta-security
+    layers:
+      .:
+      meta-tpm:
+
+  meta-virtualization:
+    url: https://github.com/Xilinx/meta-virtualization.git
+    path: layers/meta-virtualization
+
+  meta-openamp:
+    url: https://github.com/Xilinx/meta-openamp.git
+    path: layers/meta-openamp
+
+  meta-xilinx:
+    url: https://github.com/Xilinx/meta-xilinx.git
+    path: layers/meta-xilinx
+    layers:
+      meta-xilinx-core:
+      meta-xilinx-standalone:
+      meta-xilinx-standalone-sdt:
+      meta-microblaze:
+      meta-xilinx-virtualization:
+      meta-xilinx-multimedia:
+      meta-xilinx-demos:
+      meta-xilinx-imgrcvry:
+
+  meta-amd-adaptive-socs:
+    url: https://github.com/Xilinx/meta-amd-adaptive-socs.git
+    path: layers/meta-amd-adaptive-socs
+    layers:
+      meta-amd-adaptive-socs-core:
+      meta-amd-adaptive-socs-bsp:
+
+  meta-ros:
+    url: https://github.com/ros/meta-ros.git
+    path: layers/meta-ros
+    branch: scarthgap
+    layers:
+      meta-ros-common:
+      meta-ros2:
+      meta-ros2-jazzy:
+
+  meta-qt5:
+    url: https://github.com/meta-qt5/meta-qt5.git
+    path: layers/meta-qt5
+    branch: scarthgap
+
+  meta-amd-edf:
+    url: https://github.com/Xilinx/meta-amd-edf.git
+    path: layers/meta-amd-edf
+    layers:
+      .:
+      meta-amd-edf-bsp:
+
+local_conf_header:
+  00-base: |
+    CONF_VERSION = "2"
+    # Keep work dirs small on the runner; logs are kept.
+    INHERIT += "rm_work"
