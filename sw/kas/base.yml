@@ -1,8 +1,3 @@
-# sw/kas/base.yml - layer set for AMD EDF 25.11 (Vivado/EDF 2025.2, Yocto 5.0 "scarthgap")
-#
-# Mirrors Xilinx/yocto-manifests default-edf.xml @ rel-v2025.2, keeping only the
-# layers this project needs (no ROS, Qt, Jupyter, Kria, Zephyr, ...).
-#
 # Always first in a chain:  kas build sw/kas/base.yml:sw/kas/bootbin.yml
 #                           kas build sw/kas/base.yml:sw/kas/image.yml
 # Pinning: `make sw-lock` writes base.lock.yml next to this file; commit it.
@@ -25,7 +20,7 @@ repos:
   zub1cg-project:
     layers:
       sw/meta-zub1cg:
-      platform/machine:          # generated machine conf (make platform)
+      platform/machine:
 
   poky:
     url: https://github.com/Xilinx/poky.git
@@ -55,13 +50,14 @@ repos:
     url: https://github.com/Xilinx/meta-security.git
     path: layers/meta-security
     layers:
+      .:
       meta-tpm:
 
   meta-virtualization:
     url: https://github.com/Xilinx/meta-virtualization.git
     path: layers/meta-virtualization
 
-  meta-openamp:                  # required by meta-xilinx-standalone-sdt
+  meta-openamp:
     url: https://github.com/Xilinx/meta-openamp.git
     path: layers/meta-openamp
 
@@ -71,8 +67,12 @@ repos:
     layers:
       meta-xilinx-core:
       meta-xilinx-standalone:
-      meta-xilinx-standalone-sdt:  # FSBL/PMUFW from the system device tree
-      meta-microblaze:             # PMU is a MicroBlaze
+      meta-xilinx-standalone-sdt:
+      meta-microblaze:
+      meta-xilinx-virtualization:
+      meta-xilinx-multimedia:
+      meta-xilinx-demos:
+      meta-xilinx-imgrcvry:
 
   meta-amd-adaptive-socs:
     url: https://github.com/Xilinx/meta-amd-adaptive-socs.git
@@ -81,9 +81,26 @@ repos:
       meta-amd-adaptive-socs-core:
       meta-amd-adaptive-socs-bsp:
 
-  meta-amd-edf:                  # EDF distro + edf-linux-disk-image
+  meta-ros:
+    url: https://github.com/ros/meta-ros.git
+    path: layers/meta-ros
+    branch: scarthgap
+    layers:
+      meta-ros-common:
+      meta-ros2:
+      meta-ros2-jazzy:
+
+  meta-qt5:
+    url: https://github.com/meta-qt5/meta-qt5.git
+    path: layers/meta-qt5
+    branch: scarthgap
+
+  meta-amd-edf:
     url: https://github.com/Xilinx/meta-amd-edf.git
     path: layers/meta-amd-edf
+    layers:
+      .:
+      meta-amd-edf-bsp:
 
 local_conf_header:
   00-base: |

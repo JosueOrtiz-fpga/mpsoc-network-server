@@ -1,0 +1,5 @@
+/*
+ * PL content intentionally removed by sw/scripts/gen-sdt.sh (PLATFORM_PS_ONLY=1).
+ * The fabric is programmed at runtime via FPGA Manager; its device tree ships
+ * as an overlay in the PL package (make hw-plpkg).
+ */
