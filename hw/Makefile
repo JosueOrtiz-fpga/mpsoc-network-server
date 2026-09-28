@@ -34,8 +34,10 @@ export HW_DIR BUILD_DIR OUT_DIR PROJ_NAME BD_NAME TOP JOBS \
 # --- Artifacts -------------------------------------------------------
 PROJ_STAMP := $(BUILD_DIR)/.project.stamp
 BIT        := $(OUT_DIR)/$(TOP).bit
-XSA        := $(OUT_DIR)/$(PROJ_NAME)-$(GIT_SHA)$(GIT_DIRTY)-vivado$(VIVADO_VERSION).xsa
-PL_BIN     := $(OUT_DIR)/pl/$(TOP).bit.bin
+XSA_STEM   := $(PROJ_NAME)-$(GIT_SHA)$(GIT_DIRTY)-vivado$(VIVADO_VERSION)
+XSA        := $(OUT_DIR)/$(XSA_STEM).xsa
+XSA_BIT    := $(OUT_DIR)/$(XSA_STEM).bit
+PL_BIN     := $(OUT_DIR)/pl/$(XSA_STEM).bit.bin
 
 HW_SRCS := $(wildcard $(HW_DIR)/bd/*.tcl) \
            $(wildcard $(HW_DIR)/rtl/*.v $(HW_DIR)/rtl/*.sv $(HW_DIR)/rtl/*.vhd) \
@@ -86,7 +88,7 @@ $(BIT): $(PROJ_STAMP) | check-vivado
 
 xsa: $(XSA)
 
-$(XSA): $(BIT) | check-vivado
+$(XSA) $(XSA_BIT) &: $(BIT) | check-vivado
 	cd $(BUILD_DIR) && XSA_FILE=$(XSA) $(VIVADO_BATCH) -log export.log -journal export.jou \
 	  -source $(HW_DIR)/scripts/export.tcl
 	ln -sfn $(notdir $(XSA)) $(OUT_DIR)/system.xsa
@@ -94,8 +96,8 @@ $(XSA): $(BIT) | check-vivado
 
 plpkg: $(PL_BIN)
 
-$(PL_BIN): $(BIT)
-	$(HW_DIR)/scripts/mk_plpkg.sh $(BIT) $(OUT_DIR)/pl
+$(PL_BIN): $(XSA_BIT)
+	$(HW_DIR)/scripts/mk_plpkg.sh $(XSA_BIT) $(OUT_DIR)/pl
 
 wrapper: $(PROJ_STAMP) | check-vivado
 	cd $(BUILD_DIR) && $(VIVADO_BATCH) -log wrapper.log -journal wrapper.jou \

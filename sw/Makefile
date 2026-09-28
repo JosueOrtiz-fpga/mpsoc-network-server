@@ -97,6 +97,19 @@ platform-check: platform
 	fi
 	@echo "platform/ matches the committed copy."
 
+# ---- PL overlay for the runtime PL package (make hw-plpkg) ----------------------
+PL_SDT_DIR := $(ROOT)/out/hw/sdt-full
+PL_OUT_REL := out/hw/pl
+
+pl-sdt:
+	@test -n "$(XSA)" || { echo "ERROR: no XSA in out/hw - run 'make hw-xsa' first"; exit 1; }
+	@echo "SDTGen (full, with PL): $(XSA)"
+	$(VIVADO_RUN) env PLATFORM_PS_ONLY=0 $(ROOT)/sw/scripts/gen-sdt.sh "$(XSA)" "$(PL_SDT_DIR)" "$(BOARD_DTSI)"
+
+pl-overlay: pl-sdt check-versions kas-dirs
+	cd $(ROOT) && $(KAS) shell $(KAS_IMAGE) \
+	  -c 'bash $(REPO_IN)/sw/scripts/gen-pl-overlay.sh $(REPO_IN)/out/hw/sdt-full $(REPO_IN)/$(PL_OUT_REL)'
+
 # ---- images -----------------------------------------------------------------
 sw-image: check-versions kas-dirs
 	cd $(ROOT) && $(KAS) build $(KAS_BOOT)

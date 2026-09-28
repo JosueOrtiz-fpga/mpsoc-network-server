@@ -20,32 +20,10 @@ pl_overlay=${GMC_PL_OVERLAY-full}
 [ -f "$layer/conf/layer.conf" ] || die "missing $layer/conf/layer.conf"
 [ -f conf/bblayers.conf ]       || die "not in a BitBake build dir - run through 'kas shell'"
 
-# gen-machine-conf hardlinks files from the build dir into its Python tempdir.
-# Under kas-container /tmp is a different filesystem from the bind-mounted build
-# dir (EXDEV / Errno 18), so keep temp files on the build dir's filesystem.
-# cwd is the BitBake build dir here. Use a dedicated name: BitBake's own
-# TMPDIR is <build>/tmp.
-export TMPDIR="$PWD/gmc-tmp"
-mkdir -p "$TMPDIR"
-
-# ---- locate gen-machine-conf ----------------------------------------------------
-# The EDF repo manifest syncs meta-xilinx with submodules; gen-machine-conf is one
-# of them. kas does not init submodules, so do it here: this checks out exactly the
-# commit that the pinned meta-xilinx revision records.
-gmc=$(command -v gen-machine-conf || command -v gen-machineconf || true)
-if [ -z "$gmc" ]; then
-  mx_core=$(grep -oE '[^" ]*/meta-xilinx-core' conf/bblayers.conf | head -n1)
-  mx_core=${mx_core//\$\{TOPDIR\}/$PWD}
-  [ -n "$mx_core" ] || die "meta-xilinx-core not found in conf/bblayers.conf"
-  mx=$(dirname "$mx_core")
-  mx=$(realpath "$(dirname "$mx_core")")
-  echo "gen-machine: initialising submodules in $mx" >&2
-  git -c safe.directory='*' -C "$mx" submodule update --init --recursive >&2
-  gmc=$(find "$mx" -maxdepth 4 -type f \( -name gen-machine-conf -o -name gen-machineconf \) \
-        -perm -u+x | head -n1)
-  [ -n "$gmc" ] || die "gen-machine-conf not found under $mx (submodule layout changed?)"
-fi
-echo "gen-machine: using $gmc" >&2
+# shellcheck source=gmc-lib.sh
+source "$(dirname "$(realpath "$0")")/gmc-lib.sh"
+gmc_set_tmpdir
+gmc=$(gmc_locate)
 
 # ---- generate into a scratch dir ------------------------------------------------
 work=$(mktemp -d)
