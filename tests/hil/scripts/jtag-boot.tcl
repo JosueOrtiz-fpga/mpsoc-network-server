@@ -96,6 +96,17 @@ dow -force [file join $dir pmufw.elf]
 con
 after 1000
 
+# ---- 1b. Keep POWER_KILL_N (MIO34) high -------------------------------------------
+# The FSBL's psu_init muxes MIO34 to the PMU's GPO. That output (PMU_IOMODULE GPO1,
+# bit 2 = MIO34) resets to 0, which asserts POWER_KILL_N: the on/off controller (U29)
+# then cuts board power within milliseconds. Preset the output high before the FSBL runs.
+# Only bit 2 is written; bits 0/1 (MIO32/33) are plain GPIO in this design.
+say "PMU GPO: MIO34 (POWER_KILL_N) high"
+tgt "*MicroBlaze PMU*"
+catch {stop}
+mwr 0xFFD40014 0x4
+con
+
 # ---- 2. FSBL ----------------------------------------------------------------------
 say "FSBL -> A53 #0 (psu_init: MIO, clocks, DDR)"
 tgt "*APU*"
