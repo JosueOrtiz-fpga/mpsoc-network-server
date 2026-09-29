@@ -18,3 +18,5 @@ local_conf_header:
   10-image: |
     # rootfs tarball for NFS root on the HIL bench
     IMAGE_FSTYPES:append:pn-edf-linux-disk-image = " tar.gz"
+  10-license: |
+    LICENSE_FLAGS_ACCEPTED += "xilinx"

@@ -143,6 +143,8 @@ Keep comments in `versions.env` on their own lines: `make` would otherwise inclu
 
 ## Building locally
 
+Build container. Yocto builds run in the kas 5.4 container on Debian 12 (KAS_CONTAINER_IMAGE_DISTRO=debian-bookworm, set in sw/Makefile). Debian 12 is a host distro validated for Yocto scarthgap. The default Debian 13 image ships GCC 14, which fails to build bootgen-native. The image is pulled automatically on first build.
+
 ### Prerequisites
 
 - Vivado 2026.1 on `PATH` (`source <install>/2026.1/Vivado/settings64.sh`); this also provides `bootgen`
