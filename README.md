@@ -153,6 +153,15 @@ Build container. Yocto builds run in the kas 5.4 container on Debian 12 (KAS_CON
 - KAS scripts: ```git clone --branch 5.4 https://github.com/siemens/kas.git ~/.local/src/kas; sudo ln -s ~/.local/src/kas/kas-container /usr/local/bin/kas-container``` 
 - Docker ```curl -fsSL https://get.docker.com | sh; sudo usermod -aG docker $USER; newgrp docker```
 
+### Cable Drivers
+
+Ensure that the cable drivers have been installed on your machine (board must be unplugged during the process)
+```
+cd $(VIVADO_INSTALL_DIR)/data/xicom/cable_drivers/lin64/install_script/install_drivers
+sudo ./install_drivers
+```
+The programming of the FTDI chip (see Vivado documentation on `program_ftdi`) is taken care of by the vendor. Ens
+
 ### Hardware targets (implemented)
 
 ```sh

@@ -41,4 +41,14 @@ hw-plpkg:
 	  [ -f "$${d%.dtbo}.bit.bin" ] || { echo "ERROR: $$d has no matching .bit.bin (XSA and bitstream from different builds?)"; exit 1; }; \
 	done; echo "PL package:"; ls -1 out/hw/pl
 
+# ---- HIL bench: JTAG boot + TFTP/NFS netboot (tests/hil/scripts/) ------------
+HIL_SCRIPTS := tests/hil/scripts
+XSDB ?= xsdb
+
+hil-stage:
+	$(HIL_SCRIPTS)/stage-netboot.sh $(if $(WITH_PL),--with-pl) out/sw
+
+jtag-boot:
+	@test -f out/hil/boot.scr || { echo "run 'make hil-stage' first"; exit 1; }
+	$(XSDB) $(HIL_SCRIPTS)/jtag-boot.tcl out/sw/jtag out/hil/boot.scr
 clean: hw-clean
