@@ -49,6 +49,7 @@ export SDTGEN
 # kas-container runs the pinned kas image; KAS=kas uses a host install instead.
 KAS ?= kas-container
 export KAS_IMAGE_VERSION := $(KAS_VERSION)
+export KAS_CONTAINER_IMAGE_DISTRO ?= debian-bookworm
 export KAS_WORK_DIR  ?= $(ROOT)/build/kas
 export KAS_BUILD_DIR ?= $(ROOT)/build/yocto
 # DL_DIR and SSTATE_DIR: export them (CI: persistent volumes); kas forwards them.

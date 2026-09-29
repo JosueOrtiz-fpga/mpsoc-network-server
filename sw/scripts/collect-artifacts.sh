@@ -68,8 +68,11 @@ esac
 
 # ---- SD image: BOOT.BIN into the ESP (partition 1), as AMD documents for EDF ----
 # wic finds mtools through the wic-tools native sysroot (built by image.yml).
-wic cp "$out/BOOT.BIN" "$sd:1"
-wic ls "$sd:1" | grep -qiE 'boot[[:space:]]+bin' || die "BOOT.BIN missing from the ESP after wic cp"
+# wic doesn't locate the wic-tools native sysroot on its own here, so pass it explicitly.
+native=$(bitbake -e wic-tools | sed -n 's/^RECIPE_SYSROOT_NATIVE="\(.*\)"$/\1/p')
+[ -d "$native" ] || die "wic-tools native sysroot not found; run: bitbake wic-tools"
+wic cp -n "$native" "$out/BOOT.BIN" "$sd:1"
+wic ls -n "$native" "$sd:1" | grep -qiE 'boot[[:space:]]+bin' || die "BOOT.BIN missing from the ESP after wic cp"
 
 # ---- checksums --------------------------------------------------------------------
 ( cd "$out" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
