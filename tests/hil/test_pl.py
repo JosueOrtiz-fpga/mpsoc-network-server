@@ -1,19 +1,19 @@
-"""PL package: overlay load and unload, and the fabric design's registers and sensor.
+"""PL package: loading through dfx-mgr, and the fabric design's registers and sensor.
 
 Follows edf-2026_1-followups.md, section 3. The PL clock runs only while the overlay
 is loaded and a PL register read without it would probably hang the board, so every
 test leaves the overlay loaded. Load/unload cycles leak a little kernel memory per
 cycle (section 5), hence the small count.
 
-make hil-stage installs one PL package and points /lib/firmware/pl-default.dtbo at
-it. Until pl-loader.service is in the image, the test loads that overlay itself; once
-the unit exists, it must have applied the overlay at boot.
+make hil-stage installs one PL package as dfx-mgr's default firmware
+(/lib/firmware/xilinx/$HIL_PL_PKG/), which dfx-mgr-fw-load.service loads at boot.
+Every load and unload here goes through dfx-mgr-client: once dfx-mgr has loaded the
+PL, applying an overlay directly through configfs oopsed the kernel (dfx-mgr spike,
+30 September 2026).
 """
 import time
 
-
-OVERLAY = "/sys/kernel/config/device-tree/overlays/pl"
-DEFAULT_DTBO = "pl-default.dtbo"   # in /lib/firmware, the staged package's overlay
+OVERLAYS = "/sys/kernel/config/device-tree/overlays"
 IIC_DEV = "/sys/bus/platform/devices/b0000000.i2c"
 IIC_BASE = 0xB000_0000
 IIC_SR = 0x104                 # AXI IIC status register; idle value 0xC0
@@ -21,26 +21,38 @@ SENSOR = 0x3F                  # STTS22H, ADDR pin tied to ground
 CYCLES = 3
 
 
-def overlay_status(board):
-    return board.run(f"cat {OVERLAY}/status 2>/dev/null || true").stdout.strip()
+def overlays(board):
+    """{name: (status, path)} for every applied configfs overlay."""
+    out = board.run(f"for d in {OVERLAYS}/*/; do [ -d \"$d\" ] || continue; "
+                    "echo \"$(basename $d) $(cat $d/status) $(cat $d/path)\"; done", check=False).stdout
+    found = {}
+    for line in out.splitlines():
+        name, status, path = (line.split(" ", 2) + ["", ""])[:3]
+        found[name] = (status, path)
+    return found
 
 
-def load(board):
-    board.sudo(f"mkdir {OVERLAY} && printf %s {DEFAULT_DTBO} > {OVERLAY}/path")
+def dfx(board, *args):
+    r = board.sudo("dfx-mgr-client " + " ".join(args), timeout=90, check=False)
+    assert r.returncode == 0, f"dfx-mgr-client {' '.join(args)} exited {r.returncode}: {r.stdout}{r.stderr}"
+    return r.stdout
 
 
-def unload(board):
-    board.sudo(f"[ ! -d {OVERLAY} ] || rmdir {OVERLAY}")
+def load(board, pkg):
+    dfx(board, "-loadByName", pkg)
 
 
-def ensure_loaded(board):
-    if overlay_status(board) != "applied":
-        unload(board)
-        load(board)
+def unload(board, pkg):
+    dfx(board, "-unloadByName", pkg)
 
 
-def has_loader(board):
-    return board.run("systemctl cat pl-loader.service", check=False).returncode == 0
+def is_loaded(board, pkg, stem):
+    return overlays(board) == {f"{pkg}_image_1": ("applied", f"{stem}.dtbo")}
+
+
+def ensure_loaded(board, pkg, stem):
+    if not is_loaded(board, pkg, stem):
+        load(board, pkg)
 
 
 def i2c_bus(board):
@@ -49,8 +61,9 @@ def i2c_bus(board):
     return int(out[0].split("-")[1])
 
 
-def check_loaded(board):
-    assert overlay_status(board) == "applied"
+def check_loaded(board, pkg, stem):
+    ovl = overlays(board)
+    assert ovl == {f"{pkg}_image_1": ("applied", f"{stem}.dtbo")}, f"overlays: {ovl}"
     assert board.run("cat /sys/class/fpga_manager/fpga0/state").stdout.strip() == "operating"
     driver = board.run(f"basename $(readlink {IIC_DEV}/driver)", check=False).stdout.strip()
     assert driver == "xiic-i2c", f"{IIC_DEV} driver: {driver or 'none'}"
@@ -59,27 +72,27 @@ def check_loaded(board):
 
 def check_unloaded(board):
     # The PL stays programmed after removal, so fpga0 still reads "operating":
-    # check that the overlay's devices are gone instead.
+    # check that the overlay and its devices are gone instead.
+    assert overlays(board) == {}, f"overlays left: {overlays(board)}"
     assert board.run(f"test -e {IIC_DEV}", check=False).returncode != 0, f"{IIC_DEV} still present"
 
 
 def test_pl_load(board, hil_env):
-    target = board.run(f"readlink /lib/firmware/{DEFAULT_DTBO}", check=False).stdout.strip()
-    assert target == f"{hil_env['HIL_PL_STEM']}.dtbo", \
-        f"/lib/firmware/{DEFAULT_DTBO} -> {target or 'nothing'}, staged {hil_env['HIL_PL_STEM']}"
-    if has_loader(board):
-        assert overlay_status(board) == "applied", "pl-loader.service did not apply the PL overlay at boot"
-    else:
-        ensure_loaded(board)
-    check_loaded(board)
+    pkg, stem = hil_env["HIL_PL_PKG"], hil_env["HIL_PL_STEM"]
+    staged = board.run(f"cat /etc/dfx-mgrd/default_firmware; ls /lib/firmware/xilinx/{pkg}").stdout.split()
+    assert staged[0] == pkg and {f"{stem}.bit.bin", f"{stem}.dtbo", "shell.json"} <= set(staged[1:]), \
+        f"staged dfx-mgr package: {staged}"
+    log = board.sudo("journalctl -b -u dfx-mgr-fw-load.service --no-pager").stdout
+    assert f"Loaded default firmware: {pkg}" in log, "dfx-mgr-fw-load.service did not load the PL at boot"
+    check_loaded(board, pkg, stem)
     try:
         for _ in range(CYCLES):
-            unload(board)
+            unload(board, pkg)
             check_unloaded(board)
-            load(board)
-            check_loaded(board)
+            load(board, pkg)
+            check_loaded(board, pkg, stem)
     finally:
-        ensure_loaded(board)
+        ensure_loaded(board, pkg, stem)
 
 
 def read_temperature(board, bus):
@@ -95,8 +108,8 @@ def read_temperature(board, bus):
     return (raw - 0x10000 if raw & 0x8000 else raw) / 100
 
 
-def test_pl_regs(board, record_property):
-    ensure_loaded(board)
+def test_pl_regs(board, hil_env, record_property):
+    ensure_loaded(board, hil_env["HIL_PL_PKG"], hil_env["HIL_PL_STEM"])
     enabled = int(board.sudo("cat /sys/kernel/debug/clk/pl0_ref/clk_enable_count").stdout)
     assert enabled >= 1, "pl0_ref is off: reading PL registers now could hang the board"
 

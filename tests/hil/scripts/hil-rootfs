@@ -16,7 +16,8 @@
 # Usage (through sudo):
 #   hil-rootfs check                                  exits 0: tests the sudo rule
 #   hil-rootfs extract    <id> <rootfs.tar.gz>        fresh rootfs from the tarball
-#   hil-rootfs pl-package <id> <x.bit.bin> <x.dtbo>   -> /lib/firmware, pl-default.dtbo -> x.dtbo
+#   hil-rootfs pl-package <id> <name> <x.bit.bin> <x.dtbo>
+#                                                     dfx-mgr default firmware <name>
 #   hil-rootfs seed-login <id> <user> <public-key>    test login, see cmd_seed_login
 set -euo pipefail
 
@@ -67,24 +68,38 @@ cmd_extract() {
   tar --numeric-owner -xpzf "$2" -C "$d/rootfs"
 }
 
-# One PL package into /lib/firmware, and pl-default.dtbo (what pl-loader.service applies)
-# pointing at its overlay. Both files share a stem, as make hw-plpkg names them.
+# One PL package as dfx-mgr's default firmware, which dfx-mgr-fw-load.service loads at
+# boot: <x>.bit.bin, <x>.dtbo and a flat-shell shell.json in /lib/firmware/xilinx/<name>/,
+# and <name> in /etc/dfx-mgrd/default_firmware. The two files share a stem, as make
+# hw-plpkg names them.
 cmd_pl_package() {
-  [ $# -eq 3 ] || die "usage: hil-rootfs pl-package <id> <x.bit.bin> <x.dtbo>"
-  local d r fw bin=$2 dtbo=$3 stem
+  [ $# -eq 4 ] || die "usage: hil-rootfs pl-package <id> <name> <x.bit.bin> <x.dtbo>"
+  local d r pkg=$2 bin=$3 dtbo=$4 stem xil dir dfx tmp
   d=$(stage_dir "$1")
   r=$(rootfs_of "$d")
+  [[ $pkg =~ ^[A-Za-z0-9._-]+$ && $pkg != . && $pkg != .. ]] || die "bad package name '$pkg'"
   case "$bin" in *.bit.bin) ;; *) die "$bin: not a .bit.bin" ;; esac
   case "$dtbo" in *.dtbo) ;; *) die "$dtbo: not a .dtbo" ;; esac
   stem=$(basename "$bin" .bit.bin)
   [ "$(basename "$dtbo" .dtbo)" = "$stem" ] || die "$bin and $dtbo are not one package"
-  [ "$stem" != pl-default ] || die "a package cannot be named pl-default"
   user_file "$bin"
   user_file "$dtbo"
-  fw=$(inside "$r/lib/firmware" "$r")
-  install -d -m 0755 "$fw"
-  install -m 0644 -o root -g root "$bin" "$dtbo" "$fw/"
-  ln -sfn "$stem.dtbo" "$fw/pl-default.dtbo"
+  xil=$(inside "$r/lib/firmware/xilinx" "$r")
+  dfx=$(inside "$r/etc/dfx-mgrd" "$r")
+  [ -d "$dfx" ] || die "no /etc/dfx-mgrd in the staged rootfs (image without dfx-mgr?)"
+
+  install -d -m 0755 "$xil"
+  dir=$(inside "$xil/$pkg" "$r")
+  rm -rf --one-file-system "$dir"
+  install -d -m 0755 "$dir"
+  install -m 0644 -o root -g root "$bin" "$dtbo" "$dir/"
+  tmp=$(mktemp)
+  printf '{\n  "shell_type" : "XRT_FLAT",\n  "num_slots" : "1"\n}\n' > "$tmp"
+  install -m 0644 -o root -g root "$tmp" "$dir/shell.json"
+  printf '%s\n' "$pkg" > "$tmp"
+  rm -f "$(inside "$dfx/default_firmware" "$r")"
+  install -m 0644 -o root -g root "$tmp" "$dfx/default_firmware"
+  rm -f "$tmp"
 }
 
 # Test login for <user> in the staged rootfs only, never in the image:

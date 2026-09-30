@@ -77,8 +77,10 @@ there (this needs sudo), and builds `out/hil/boot.scr`. `<id>` is the build's `g
 warnings. A warning means the host is missing its export or its `192.168.77.1` address.
 
 The PL package goes into the staged rootfs as well: the one `make hw-plpkg` recorded in
-`out/hw/pl/current`, or `PL_STEM=<stem>` for another package in `out/hw/pl/`. Its `.bit.bin`
-and `.dtbo` land in `/lib/firmware/`, with `pl-default.dtbo` pointing at the `.dtbo`.
+`out/hw/pl/current`, or `PL_STEM=<stem>` for another package in `out/hw/pl/`. It is staged as
+dfx-mgr's default firmware: `.bit.bin`, `.dtbo` and a flat-shell `shell.json` in
+`/lib/firmware/xilinx/zub1cg/` (`HIL_PL_PKG`), and `zub1cg` in `/etc/dfx-mgrd/default_firmware`.
+`dfx-mgr-fw-load.service` loads it at boot.
 
 `make jtag-boot` then goes through these stages:
 
@@ -101,14 +103,20 @@ If U-Boot's autoboot does not run the script, press a key to stop autoboot and t
 source 0x20000000
 ```
 
-## Loading PL Overlay
+## Loading and unloading the PL
+
+dfx-mgr loads the staged package at boot (overlay `zub1cg_image_1`). By hand:
 
 ```
-readlink /lib/firmware/pl-default.dtbo      # the staged package
-sudo mkdir /sys/kernel/config/device-tree/overlays/pl
-echo pl-default.dtbo | sudo tee /sys/kernel/config/device-tree/overlays/pl/path
-cat /sys/kernel/config/device-tree/overlays/pl/status
+sudo dfx-mgr-client -listPackage
+sudo dfx-mgr-client -unloadByName zub1cg
+sudo dfx-mgr-client -loadByName zub1cg
+ls /sys/kernel/config/device-tree/overlays/
 ```
+
+Always go through `dfx-mgr-client`. Once dfx-mgr has loaded the PL, applying an overlay
+directly through configfs (`mkdir .../overlays/<name>`, write `path`) oopses the kernel in
+`dma_buf_dynamic_attach`: dfx-mgr leaves FPGA Manager flags and the firmware search path set.
 
 ## Configuration
 

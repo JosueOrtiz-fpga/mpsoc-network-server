@@ -4,9 +4,10 @@
 #   out/sw/Image, system.dtb   -> $HIL_SRV/<id>/          (TFTP)
 #   out/sw/rootfs.tar.gz       -> $HIL_SRV/<id>/rootfs/   (NFS root, extracted as root)
 #   tests/hil/scripts/netboot.cmd         -> out/hil/boot.scr        (loaded over JTAG by jtag-boot.tcl)
-#   out/hw/pl/<stem>.bit.bin + .dtbo      -> rootfs/lib/firmware/, with pl-default.dtbo
-#                                            pointing at the .dtbo; <stem> is the one in
-#                                            out/hw/pl/current (make hw-plpkg) or --pl-stem
+#   out/hw/pl/<stem>.bit.bin + .dtbo      -> rootfs/lib/firmware/xilinx/$HIL_PL_PKG/, as
+#                                            dfx-mgr's default firmware (loaded at boot);
+#                                            <stem> is the one in out/hw/pl/current
+#                                            (make hw-plpkg) or --pl-stem
 #   test login: $HIL_SSH_KEY.pub for $HIL_SSH_USER, no forced password change, sudo
 #               without a password (in the staged rootfs only, never in the image)
 #
@@ -89,8 +90,8 @@ install -m 0644 "$sw/Image" "$sw/system.dtb" "$dest/"
 say "extracting rootfs"
 sudo -n "$helper" extract "$id" "$sw/rootfs.tar.gz"
 
-sudo -n "$helper" pl-package "$id" "$pl_dir/$pl_stem.bit.bin" "$pl_dir/$pl_stem.dtbo"
-say "PL package: $pl_stem (pl-default.dtbo)"
+sudo -n "$helper" pl-package "$id" "$HIL_PL_PKG" "$pl_dir/$pl_stem.bit.bin" "$pl_dir/$pl_stem.dtbo"
+say "PL package: $pl_stem (dfx-mgr default firmware $HIL_PL_PKG)"
 
 say "test login: $HIL_SSH_USER with $HIL_SSH_KEY"
 sudo -n "$helper" seed-login "$id" "$HIL_SSH_USER" "$HIL_SSH_KEY.pub"
