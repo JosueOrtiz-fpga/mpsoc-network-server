@@ -3,6 +3,9 @@
 One SSH master connection per run (ControlMaster), so each command costs a round
 trip instead of a new handshake. BatchMode makes a missing key fail at once instead
 of stopping at a password prompt.
+
+Every command goes to commands.log in the run directory with its exit status and
+output, on passing runs too, so register and sensor values can be read back later.
 """
 import shlex
 import subprocess
@@ -14,7 +17,7 @@ class BoardError(Exception):
 
 
 class Board:
-    def __init__(self, env, console, control_dir):
+    def __init__(self, env, console, control_dir, log_path):
         self.env = env
         self.console = console
         self.booted_id = None
@@ -28,26 +31,44 @@ class Board:
             "-o", "ControlPersist=120",
             f"{env['HIL_SSH_USER']}@{env['HIL_BOARD_IP']}",
         ]
+        self._log = open(log_path, "a", buffering=1)
 
-    def run(self, cmd, timeout=30, check=True):
-        """Run a shell command as the test user; returns CompletedProcess (text)."""
+    def note(self, text):
+        """A heading in commands.log, e.g. the test that issues the next commands."""
+        self._log.write(f"\n=== {text}\n")
+
+    def _record(self, cmd, status, out="", err=""):
+        stamp = time.strftime("%H:%M:%S", time.gmtime())
+        lines = [f"[{stamp}] $ {cmd}", f"  -> {status}"]
+        lines += [f"  | {l}" for l in out.rstrip("\n").splitlines()]
+        lines += [f"  ! {l}" for l in err.rstrip("\n").splitlines()]
+        self._log.write("\n".join(lines) + "\n")
+
+    def run(self, cmd, timeout=30, check=True, log=True, shown=None):
+        """Run a shell command as the test user; returns CompletedProcess (text).
+        `shown` is what commands.log records instead of `cmd`; `log=False` skips it."""
         try:
             r = subprocess.run(self._ssh + [cmd], capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
+            if log:
+                self._record(shown or cmd, f"timeout after {timeout} s")
             raise BoardError(f"timeout after {timeout} s: {cmd}") from None
+        if log:
+            self._record(shown or cmd, f"exit {r.returncode}", r.stdout, r.stderr)
         if check and r.returncode:
             raise BoardError(f"{cmd!r} exited {r.returncode}: {(r.stderr or r.stdout).strip()}")
         return r
 
     def sudo(self, cmd, timeout=30, check=True):
         """Run a shell command as root (password-free sudo from the staged rootfs)."""
-        return self.run("sudo -n sh -c " + shlex.quote(cmd), timeout=timeout, check=check)
+        return self.run("sudo -n sh -c " + shlex.quote(cmd), timeout=timeout, check=check,
+                        shown=f"sudo {cmd}")
 
     def wait_ssh(self, timeout):
         deadline = time.monotonic() + timeout
         while True:
             try:
-                r = self.run("true", timeout=10, check=False)
+                r = self.run("true", timeout=10, check=False, log=False)   # polling, not worth logging
                 if r.returncode == 0:
                     return
                 last = r.stderr.strip() or f"exit {r.returncode}"
@@ -75,3 +96,4 @@ class Board:
 
     def close(self):
         subprocess.run(self._ssh[:-1] + ["-O", "exit", self._ssh[-1]], capture_output=True)
+        self._log.close()
