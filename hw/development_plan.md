@@ -2,7 +2,7 @@
 
 Release plan for the DIFI streaming baseline in [`difi-streaming-architecture.md`](difi-streaming-architecture.md), from the current bench state (`edf-2026_1-followups.md`, rev D) to v1.0.0. Every release runs on the board, passes the HIL suite and is tagged. No release waits for the full feature set.
 
-> **Status:** approved (30 September 2026); R0 and B2 amended the same day (PL package staged by `make hil` until B2, see [Decisions](#decisions)). Effort figures are estimates for one developer (see [Planning assumptions](#planning-assumptions)). The releases implement the approved architecture and do not change it. Where a release implements only part of a behaviour, [Interim behaviour](#interim-behaviour) says what that build does instead.
+> **Status:** approved (30 September 2026); R0 and B2 amended the same day (PL package staged by `make hil` until B2, see [Decisions](#decisions)); release tags moved up one, because `v0.1.0` already marks rev D. Effort figures are estimates for one developer (see [Planning assumptions](#planning-assumptions)). The releases implement the approved architecture and do not change it. Where a release implements only part of a behaviour, [Interim behaviour](#interim-behaviour) says what that build does instead.
 
 ---
 
@@ -49,14 +49,14 @@ HIL tests accumulate: every release runs all earlier tests as regression.
 
 | Release | Tag | Theme | What you can do with it |
 |---|---|---|---|
-| R0 | v0.1.0 | Bench baseline | Boot a tagged, HIL-tested image; the PL loads at boot; read the temperature sensor |
+| R0 | v0.2.0 | Bench baseline | Boot a tagged, HIL-tested image; the PL loads at boot; read the temperature sensor |
 | M1 | none (host only) | Reference model | Generate DIFI packets on LNXPC that `gr-difi` accepts |
-| R1 | v0.2.0 | Platform freeze and register bank | Talk to the DIFI register bank on hardware; capture coherent DMA frames |
-| R2 | v0.3.0 | First packets | Capture bit-exact DIFI packets (ramp) on the board and replay them into GNU Radio |
-| R3 | v0.4.0 | Live stream | Stream DIFI continuously from the board into `gr-difi` over UDP |
-| R4 | v0.5.0 | Tones and DDC | See a tunable two-tone signal in a GNU Radio waterfall at all six main rates |
-| R5 | v0.6.0 | Live retune | Retune while streaming, announced by context packets |
-| R6 | v0.7.0 | Disciplined time | Timestamps within milliseconds of NTP, with calibrated-time lock reported |
+| R1 | v0.3.0 | Platform freeze and register bank | Talk to the DIFI register bank on hardware; capture coherent DMA frames |
+| R2 | v0.4.0 | First packets | Capture bit-exact DIFI packets (ramp) on the board and replay them into GNU Radio |
+| R3 | v0.5.0 | Live stream | Stream DIFI continuously from the board into `gr-difi` over UDP |
+| R4 | v0.6.0 | Tones and DDC | See a tunable two-tone signal in a GNU Radio waterfall at all six main rates |
+| R5 | v0.7.0 | Live retune | Retune while streaming, announced by context packets |
+| R6 | v0.8.0 | Disciplined time | Timestamps within milliseconds of NTP, with calibrated-time lock reported |
 | R7 | v1.0.0 | Baseline complete | Certified captures, SD-card release, 24 h soak |
 
 Board-track items B1 and B2 (see [Parallel tracks](#parallel-tracks)) are scheduled between releases and ship with the release that follows them.
@@ -155,7 +155,7 @@ flowchart LR
 
 ## Releases
 
-### R0: Bench baseline (v0.1.0)
+### R0: Bench baseline (v0.2.0)
 
 **Goal.** Turn the working manual bench into a scripted, HIL-tested, tagged release, so every later increment ships through the same steps.
 
@@ -173,7 +173,7 @@ flowchart LR
 
 **Exit criteria.**
 
-- `make release` for `v0.1.0` runs the full build and the HIL suite unattended from a clean checkout and passes.
+- `make release` for `v0.2.0` runs the full build and the HIL suite unattended from a clean checkout and passes.
 - `test_pl_load` and `test_pl_regs` pass after a boot in which the image's loader applies the PL package that `make hil` staged, with no manual step.
 - A PL-only rebuild reaches the board through `make hil` without a Yocto build.
 
@@ -192,7 +192,7 @@ flowchart LR
 
 **Exit criteria.** The pre-check passes: `gr-difi` accepts the packets without errors and produces a tone at the expected frequency. If it rejects anything, settle it here, before RTL.
 
-### R1: Platform freeze and register bank (v0.2.0)
+### R1: Platform freeze and register bank (v0.3.0)
 
 **Goal.** Make the only PS configuration change the baseline needs, and prove the control plane and the coherent DMA path on hardware before any packet logic exists.
 
@@ -213,7 +213,7 @@ flowchart LR
 
 **Risk.** Coherency is the architecture's largest open _(verify)_. A PS-side setting discovered after R1 would break the freeze, so settle it here even if that stretches R1. If the PL side misbehaves, a non-coherent mapping with explicit sync in `difi-uio` keeps R2 moving, and the item carries into R3.
 
-### R2: First packets (v0.3.0)
+### R2: First packets (v0.4.0)
 
 **Goal.** Bit-exact DIFI packets from the PL, verified on hardware against the reference model.
 
@@ -233,7 +233,7 @@ flowchart LR
 
 **Not in this release.** Continuous streaming, tones, runtime commits. Every commit that changes a setting while running is rejected with `0x03`.
 
-### R3: Live stream (v0.4.0)
+### R3: Live stream (v0.5.0)
 
 **Goal.** A continuous DIFI stream from the board into GNU Radio: the first release that works as a DIFI source.
 
@@ -255,7 +255,7 @@ flowchart LR
 
 **Risk.** The driver is the largest single software item. Check early that `xilinx_dma` reports the transferred length of a short, `TLAST`-terminated S2MM descriptor in its completion residue, because the sender's length check relies on it _(verify)_.
 
-### R4: Tones and DDC (v0.5.0)
+### R4: Tones and DDC (v0.6.0)
 
 **Goal.** The real signal chain: tones in, complex baseband out, with correct timestamps and context.
 
@@ -273,7 +273,7 @@ flowchart LR
 
 **Risk.** Timing closure at 122.88 MHz on the -1 part, with CIC registers of about 16 + 47 bits: budget time for pipelining. BRAM for the FIR and the PL FIFO is limited on the ZU1. The DDC and its model need no hardware, so they are the best candidates for build-wait work during R2 and R3.
 
-### R5: Live retune (v0.6.0)
+### R5: Live retune (v0.7.0)
 
 **Goal.** Runtime commits exactly as specified: aligned to the signal, announced and tear-free.
 
@@ -287,7 +287,7 @@ flowchart LR
 - cocotb: commit semantics, retune timing, context rules with commits, rejection codes while enabled.
 - `test_difi_retune` as specified in the architecture. A burst of 20 commits stays within 20 context packets per second.
 
-### R6: Disciplined time (v0.7.0)
+### R6: Disciplined time (v0.8.0)
 
 **Goal.** Timestamps that track true time, with an honest lock indicator.
 
@@ -407,4 +407,5 @@ Closed on 30 September 2026.
 - [x] **Build and bench host:** LNXPC. No manual move to the home LAN is needed to watch the stream.
 - [x] **CI and labgrid:** deferred (see [Deferred](#deferred)). Releases are built and tested with `make release` on LNXPC; `make hil` drives the bench with a small pytest fixture.
 - [x] **PL package in the rootfs (R0 re-scope):** deferred to B2. Until standalone boot is needed, `make hil` stages the PL package onto the NFS root and the image carries only the boot-time loader, so a PL-only change needs no Yocto build. B2 adds the package to the SD image. About 2–4 h move from R0 to B2; the R0 figure also absorbs the gaps found while scoping it (fragment merging, login expiry, persistent Yocto caches, stored XSA).
+- [x] **Tag numbering:** R0 is `v0.2.0` and R1 to R6 follow as `v0.3.0` to `v0.8.0`; R7 stays `v1.0.0`. `v0.1.0` was already pushed on `a227a1c` (rev D, AXI IIC interrupt) and stays there, because moving a published tag rewrites it for everyone who fetched it.
 - [x] **B1 before R3:** moved from before R1. Its purpose is unattended recovery, which first matters for R3's hour-long runs; until then the bench is attended.
