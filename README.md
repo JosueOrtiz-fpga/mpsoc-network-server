@@ -60,11 +60,11 @@ Top level: `hw/rtl/mpsoc_bd_wrapper.v` (with IOBUFs for SCL/SDA). The I2C pin lo
 | RTL lint and simulation | Verilator, cocotb (GHDL for VHDL) | Yes |
 | Synthesis, implementation, bitstream | AMD Vivado 2026.1 | No, unavoidable for UltraScale+ |
 | PL package (`.bit.bin`) | bootgen | Yes |
-| Hardware handoff | XSA → SDTGen → Lopper → gen-machine-conf _(planned)_ | Yes |
-| Linux distribution | Yocto via AMD EDF / meta-xilinx, pinned with kas _(planned)_ | Yes |
-| PL loading at runtime | Linux FPGA Manager + device-tree overlays | Yes |
+| Hardware handoff | XSA → SDTGen → Lopper → gen-machine-conf | Yes |
+| Linux distribution | Yocto via AMD EDF / meta-xilinx, pinned with kas | Yes |
+| PL loading at runtime | Linux FPGA Manager + device-tree overlays, loaded at boot by AMD dfx-mgr | Yes |
 | CI orchestration | GitLab.com Free + self-hosted GitLab Runner _(deferred)_ | Runner yes; service free tier |
-| HIL test framework | labgrid + pytest _(planned)_ | Yes |
+| HIL test framework | pytest with a small project harness (`tests/hil/harness/`); labgrid deferred | Yes |
 | JTAG loading | xsdb (ships with Vivado) | No; OpenOCD is a possible later alternative |
 
 There is no production-ready open-source bitstream flow for UltraScale+. Vivado is treated as a pinned build step, and everything downstream of the XSA is fully open.
@@ -78,9 +78,11 @@ zub1cg-project/
 ├── README.md
 ├── versions.env                   # Pinned tool, board and layer versions
 ├── Makefile                       # Top-level entry points (make help)
-├── .gitignore / .gitattributes
+├── .gitignore
 ├── hw/                            # Everything Vivado touches
-│   ├── Makefile                   # lint | sim | project | bit | xsa | plpkg | wrapper | clean
+│   ├── Makefile                   # lint | sim | project | bit | xsa | plpkg | stem | wrapper | clean
+│   ├── architecture.md            # DIFI streaming architecture
+│   ├── development_plan.md        # Releases R0-R7
 │   ├── scripts/
 │   │   ├── common.tcl             # Shared settings, version guard, helpers
 │   │   ├── create_project.tcl     # Throwaway project from committed sources
@@ -93,20 +95,27 @@ zub1cg-project/
 │   ├── constraints/zub1cg_top.xdc # Bitstream settings; non-board-flow pins
 │   ├── ip/                        # .gitkeep: standalone IP (.tcl or .xci)
 │   └── sim/                       # .gitkeep: cocotb / Verilator testbenches
-├── platform/                      # Generated from the XSA, committed (planned)
-│   ├── sdt/                       # .gitkeep
-│   └── machine/                   # .gitkeep
+├── platform/                      # Generated from the XSA, committed
+│   ├── sdt/                       # SDTGen output (PS only)
+│   └── machine/                   # gen-machine-conf output: the boot machine
 ├── sw/
-│   ├── kas/                       # .gitkeep: base.yml, dev.yml, release.yml, hil.yml
-│   ├── meta-zub1cg/               # .gitkeep: BSP layer
-│   ├── meta-zub1cg-app/           # .gitkeep: product layer (rename freely)
+│   ├── Makefile                   # platform | pl-overlay | sw-image | sw-sdk | sw-lock | sw-shell
+│   ├── kas/                       # base.yml (+ lock), bootbin.yml, image.yml
+│   ├── scripts/                   # SDTGen, gen-machine-conf, PL overlay, artifact collection
+│   ├── meta-zub1cg/               # BSP layer
+│   ├── meta-zub1cg-app/           # .gitkeep: product layer, created with its first recipe
 │   └── apps/                      # .gitkeep: application sources
-├── tests/hil/                     # .gitkeep: pytest + labgrid tests
-├── ci/                            # .gitkeep placeholders; CI is deferred
-│   ├── containers/
+├── tests/hil/                     # HIL suite (make hil)
+│   ├── test_*.py, conftest.py     # Tests and the session fixture that boots the board
+│   ├── harness/                   # Console, JTAG boot, SSH access
+│   └── scripts/                   # Host setup, staging, JTAG boot, netboot (README.md)
+├── ci/
+│   ├── release.sh                 # make release
+│   ├── containers/                # .gitkeep: CI is deferred
 │   ├── hil/
 │   └── pipeline/
-└── docs/                          # .gitkeep
+└── docs/
+    └── release-notes-template.md  # Filled in by make release
 ```
 
 Generated trees are ignored by git: `build/` (Vivado project, run directories, logs) and `out/` (bitstream, XSA, PL package, reports).
@@ -117,7 +126,7 @@ Generated trees are ignored by git: `build/` (Vivado project, run directories, l
 - **The Vivado project is disposable.** `create_project.tcl` deletes and recreates `build/hw/vivado` from `bd/`, `rtl/`, `ip/` and `constraints/` on every run. This uses a scripted project rather than pure non-project mode, because IP Integrator block designs are much better supported in project mode. Nothing in `build/` is ever committed.
 - **The block design is committed as Tcl.** After editing the BD in the GUI, run `write_bd_tcl -force hw/bd/mpsoc_bd.tcl` from the throwaway project and commit the diff. Never commit `.bd` files.
 - **The wrapper is committed.** `hw/rtl/mpsoc_bd_wrapper.v` is the top level. When BD external ports change, run `make hw-wrapper` to regenerate it and review the diff. Put custom top-level logic in a separate module, because a regenerated wrapper overwrites edits.
-- **`platform/` is generated but committed** _(planned)_. CI regenerates it from each new XSA and fails if it differs from the committed copy, so PS-side changes appear as reviewable diffs.
+- **`platform/` is generated but committed.** `make platform-check` (part of `make release`) regenerates it from the new XSA and fails if it differs from the committed copy, so PS-side changes appear as reviewable diffs.
 - **The BSP layer and the product layer are separate.** `meta-zub1cg` holds board plumbing (power button and kill handling, Ethernet PHY, USB hub, anything ported from `meta-avnet`). `meta-zub1cg-app` holds everything specific to this project.
 
 ---
@@ -171,7 +180,7 @@ make hw-sim         # runs hw/sim/Makefile if present, otherwise skips
 make hw-project     # recreate build/hw/vivado
 make hw-bit         # synth + impl + bitstream; fails on errors or negative WNS/WHS
 make hw-xsa         # out/hw/zub1cg-<sha>[-dirty]-vivado2026.1.xsa + system.xsa link
-make hw-plpkg       # out/hw/pl/mpsoc_bd_wrapper.bit.bin for the FPGA Manager
+make hw-plpkg       # out/hw/pl/<stem>.bit.bin, .dtbo, .dtso; records <stem> in out/hw/pl/current
 make hw-wrapper     # regenerate hw/rtl/mpsoc_bd_wrapper.v after BD port changes
 make hw-clean       # remove build/hw and out/hw
 ```
@@ -191,29 +200,51 @@ Outputs:
 
 | Path | Content |
 |---|---|
-| `out/hw/mpsoc_bd_wrapper.bit` | Bitstream |
+| `out/hw/<stem>.bit` | Bitstream (`<stem>` = `zub1cg-<sha>[-dirty]-vivado2026.1`) |
 | `out/hw/<name>.xsa`, `out/hw/system.xsa` | Fixed XSA with bitstream; stable link for downstream tools |
-| `out/hw/pl/mpsoc_bd_wrapper.bit.bin` | PL package for runtime loading (overlay `.dtbo` still TODO) |
+| `out/hw/pl/<stem>.bit.bin`, `.dtbo`, `.dtso` | PL package for runtime loading; `out/hw/pl/current` names the last one built |
 | `out/hw/reports/` | Timing summary, utilization, DRC, methodology |
 | `build/hw/*.log` | Vivado logs per step |
 
-### Software, platform and HIL targets (planned)
+### Software, platform, HIL and release targets
 
 ```sh
 make platform        # XSA → SDT → machine conf into platform/
 make platform-check  # regenerate platform/ and fail on diff
-make sw-image        # kas build → BOOT.BIN, WIC image
-make sw-sdk          # Yocto SDK
-make hil             # boot on the HIL board and run tests/hil
+make sw-image        # kas build → out/sw: BOOT.BIN, Image, system.dtb, rootfs, WIC, jtag/
+make sw-sdk          # EDF application SDK
+make hil-stage       # stage out/sw and the PL package for netboot (PL_STEM=<stem> for another)
+make jtag-boot       # boot the staged build over JTAG, console by hand
+make hil             # hil-stage + JTAG boot + pytest suite; logs in out/hil/<id>/<time>/
+make release         # on a v* tag, clean tree: full build + HIL → /srv/releases/<tag>/
 ```
 
-These currently print "not implemented yet" and exit with an error.
+The HIL bench (host setup, staging, boot flow) is described in [`tests/hil/scripts/README.md`](tests/hil/scripts/README.md).
+
+Yocto downloads and shared state live in `~/.cache/zub1cg-yocto/` (`YOCTO_CACHE`, or `DL_DIR` and `SSTATE_DIR` directly), outside the checkout, so a fresh checkout or release worktree builds incrementally.
+
+### What rebuilds when
+
+Because the bitstream is loaded at runtime rather than baked into BOOT.BIN, most changes avoid a full rebuild:
+
+| Change | Run | Board |
+|---|---|---|
+| RTL or PL-only block design change | `make hw-xsa hw-plpkg`, then `make hil` | Last `sw-image` build, new PL package; no Yocto build |
+| PS configuration change (MIO, clocks, DDR, AXI ports) | `make hw-xsa hw-plpkg platform`, commit the `platform/` diff, `make sw-image`, `make hil` | Full rebuild, including BOOT.BIN |
+| Kernel, rootfs or app change | `make sw-image` (incremental), then `make hil` | Last PL package |
+| Docs only | Nothing | Nothing |
+
+On MPSoC, the PS configuration is applied by the FSBL at boot. A PS change made in the Vivado block design therefore always needs a new boot image, and `make platform-check` (run by `make release`) is what enforces the committed `platform/` diff.
+
+### Releases
+
+`make release` refuses to run with local changes, untracked files, or a HEAD without its `v*` tag. It builds the tag in a clean worktree (`build/release/<tag>/`), runs `hw-lint`, `hw-sim`, `hw-xsa`, `hw-plpkg`, `platform-check`, `sw-image` (plus `sw-sdk` with `RELEASE_SDK=1`) and `make hil`, and on a pass collects the artifacts, the HIL report, `SHA256SUMS` and a pre-filled `RELEASE_NOTES.md` into `/srv/releases/<tag>/`, which is never overwritten. Tag locally, run it, and push the tag only if it passes (see the release process in [`hw/development_plan.md`](hw/development_plan.md#release-process)).
 
 ---
 
 ## CI pipeline
 
-> **Not set up yet.** This section records the agreed design. No `.gitlab-ci.yml` exists in the repo, and `ci/` holds only placeholders. The CI jobs will call the same `make` targets used locally.
+> **Deferred** (see [`hw/development_plan.md`](hw/development_plan.md#deferred)). This section records the design for later. No `.gitlab-ci.yml` exists; until then, releases are built and tested with `make release` on LNXPC, which is the sequence a pipeline would run, and `make hil` is the part labgrid would take over.
 
 ### Platform choice
 
@@ -253,7 +284,7 @@ flowchart LR
   end
   X --> D
   subgraph S3[Stage 3: HIL]
-    G[JTAG boot<br/>+ netboot] --> H[labgrid tests]
+    G[JTAG boot<br/>+ netboot] --> H[pytest suite<br/>tests/hil]
   end
   F --> G
   X --> G
@@ -282,24 +313,11 @@ flowchart LR
 
 This stage boots the new images on the dedicated board and runs `tests/hil`. See [Hardware-in-the-loop testing](#hardware-in-the-loop-testing).
 
-### What rebuilds when
-
-Because the bitstream is loaded at runtime rather than baked into BOOT.BIN, most changes avoid a full rebuild:
-
-| Change | Stage 1 | Stage 2 | Stage 3 |
-|---|---|---|---|
-| RTL or PL-only block design change | Full | Skipped; last good image reused | Runs with new PL package |
-| PS configuration change (MIO, clocks, DDR, AXI ports) | Full | Full, including BOOT.BIN; `platform/` diff must be committed | Runs |
-| Kernel, rootfs or app change | Skipped; last released XSA reused | Incremental | Runs |
-| Docs only | Skipped | Skipped | Skipped |
-
-On MPSoC, the PS configuration is applied by the FSBL at boot. A PS change made in the Vivado block design therefore always needs a new boot image, and the committed `platform/` diff check is what enforces that.
-
 ### Caching and retention
 
 | Data | Location | Retention |
 |---|---|---|
-| Yocto `DL_DIR` and `SSTATE_DIR` | Runner host, persistent volume | Pruned periodically |
+| Yocto `DL_DIR` and `SSTATE_DIR` | Runner host, persistent volume (today: `~/.cache/zub1cg-yocto/` on LNXPC) | Pruned periodically |
 | Vivado and builder container images | Runner host local image store | Rebuilt on `versions.env` change |
 | XSA, PL package, reports | GitLab artifacts | Short expiry on branches; kept on tags |
 | WIC images, SDKs | Runner host, `/srv/ci-artifacts/<sha>/` | Kept for tags; pruned otherwise |
@@ -366,29 +384,29 @@ The HIL network is a point-to-point link. The runner serves DHCP, TFTP and NFS o
 ### Boot flow under test
 
 1. Reset the board over JTAG, or power-cycle it if JTAG is unresponsive.
-2. Load PMUFW, then FSBL, then TF-A, then U-Boot, all over JTAG with `xsdb` (`ci/hil/jtag-boot.tcl`).
-3. U-Boot runs a netboot script. It fetches the kernel and device tree over TFTP and mounts the rootfs over NFS from `/srv/hil/<sha>/`.
-4. Copy the PL package into the rootfs `/lib/firmware/` before boot.
-5. labgrid waits for the login prompt on UART0, then runs the pytest suite over the serial console or SSH.
+2. Load PMUFW, then FSBL, then TF-A, then U-Boot, all over JTAG with `xsdb` (`tests/hil/scripts/jtag-boot.tcl`).
+3. U-Boot runs a netboot script. It fetches the kernel and device tree over TFTP and mounts the rootfs over NFS from `/srv/hil/<id>/`.
+4. The PL package is staged into that rootfs before boot as dfx-mgr's default firmware, which `dfx-mgr-fw-load.service` loads at boot.
+5. The pytest harness logs UART0 from before the boot, waits for the login prompt, then runs the suite over SSH.
 
 Testing the real SD-card boot path (WIC image, SD1 boot mode) needs an SD-card multiplexer and a boot-mode override. It is deferred to a later release-test stage.
 
-### Test suite (`tests/hil/`) _(planned)_
+### Test suite (`tests/hil/`)
 
 | Test | Checks |
 |---|---|
-| `test_boot` | Reaches the login prompt within a timeout; no kernel oops or panic in the console log |
-| `test_pl_load` | FPGA Manager loads the `.bit.bin` and overlay; state reads `operating` |
-| `test_pl_regs` | Reads a known ID or version register from the fabric design over AXI |
-| `test_apps` | Project applications start and pass their self-checks |
-| `test_shutdown` | A clean shutdown drives the kill signal and the board powers off without filesystem errors |
+| `test_boot` | The staged build reaches the login prompt; no oops, panic, `BUG:` or kernel warning on the console; no unexpected failed systemd units |
+| `test_pl_load` | dfx-mgr loaded the staged PL package at boot; unload/load cycles through `dfx-mgr-client` |
+| `test_pl_regs` | `pl0_ref` enabled; AXI IIC `SR`, STTS22H WHOAMI and a plausible temperature |
+| `test_apps` _(planned)_ | Project applications start and pass their self-checks |
+| `test_shutdown` _(planned, B2)_ | A clean shutdown drives the kill signal and the board powers off without filesystem errors |
 
-Console logs and the pytest JUnit report are always uploaded as job artifacts, including on failure.
+Each run writes `console.log`, `jtag-boot.log`, `commands.log` (every command run on the board, with its output) and `junit.xml` to `out/hil/<id>/<time>/`, including on failure.
 
 ### Safety and robustness
 
-- **One job at a time.** `resource_group: zuboard` ensures only one job ever touches the board.
-- **Timeouts.** Every step has a timeout. On timeout, the job escalates from JTAG reset to power cycle and then fails with logs attached.
+- **One run at a time.** The console is locked exclusively, so a second run (or a forgotten picocom) fails at once. In CI, `resource_group: zuboard` would do the same.
+- **Timeouts.** Every boot step has a timeout (`HIL_T_*` in `hil.env`); a timeout fails the run with the console tail attached. Escalating to a power cycle needs B1 (INIT strap and smart plug).
 - **No secrets on the board.** The board lives on the isolated link and uses a test-only rootfs configuration.
 
 ---
@@ -407,24 +425,25 @@ Console logs and the pytest JUnit report are always uploaded as job artifacts, i
 
 Hardware:
 
-- [ ] Connect the AXI IIC interrupt to the PS (`pl_ps_irq0`) before the Linux bring-up, then re-export `mpsoc_bd.tcl`.
-- [ ] First full `make hw-xsa hw-plpkg` run on the build machine; confirm the board flow constrains the sensor I2C pins (check the generated `*_board.xdc` and `out/hw/reports/drc.rpt`).
-- [ ] Add the device-tree overlay (`.dtbo`) to the PL package once the SDT flow exists.
+- [x] Connect the AXI IIC interrupt to the PS (`pl_ps_irq0`) before the Linux bring-up, then re-export `mpsoc_bd.tcl`.
+- [x] First full `make hw-xsa hw-plpkg` run on the build machine; confirm the board flow constrains the sensor I2C pins (check the generated `*_board.xdc` and `out/hw/reports/drc.rpt`).
+- [x] Add the device-tree overlay (`.dtbo`) to the PL package once the SDT flow exists.
 - [ ] Add a first own RTL module and testbench so `hw-lint` and `hw-sim` do real work.
 
 Software and platform:
 
-- [ ] Fill in `EDF_RELEASE`, `YOCTO_CODENAME` and `KAS_VERSION` for the release matching Vivado 2026.1.
-- [ ] Implement `make platform` / `platform-check` (SDTGen, Lopper, gen-machine-conf).
-- [ ] Create `meta-zub1cg`; port the board essentials from `meta-avnet`.
-- [ ] Create the kas files and `make sw-image` / `sw-sdk`.
+- [x] Fill in `EDF_RELEASE`, `YOCTO_CODENAME` and `KAS_VERSION` for the release matching Vivado 2026.1.
+- [x] Implement `make platform` / `platform-check` (SDTGen, Lopper, gen-machine-conf).
+- [x] Create `meta-zub1cg`.
+- [ ] Port the board essentials from `meta-avnet` (power handling, MAC EEPROM: B2).
+- [x] Create the kas files and `make sw-image` / `sw-sdk`.
 
 HIL and CI:
 
 - [ ] Confirm runner host specs (OS, cores, RAM, SSD) and whether it is a daily-use desktop or a dedicated machine.
 - [ ] Verify whether FT2232H-driven PS_POR/PS_SRST reset is populated on this board revision.
 - [ ] Swap R213 → R212 on the HIL board for automatic power-up.
-- [ ] Write the xsdb JTAG-boot script, U-Boot netboot script and labgrid environment; first `test_boot`.
+- [x] Write the xsdb JTAG-boot script, U-Boot netboot script and HIL harness (pytest; labgrid deferred); first `test_boot`.
 - [ ] Set up the Vivado and Yocto containers and the GitLab CI pipeline (deferred).
 - [ ] Later: SD mux for real SD-boot release tests; evaluate OpenOCD in place of xsdb.
 

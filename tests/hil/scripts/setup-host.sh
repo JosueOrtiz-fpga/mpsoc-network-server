@@ -7,7 +7,7 @@
 #   --check    only run the checks (after a reboot, or when a boot misbehaves)
 #
 # Env: HIL_NIC   wired interface cabled to the board (default: enp2s0)
-#      plus everything in hil.env (HIL_HOST_IP, HIL_BOARD_IP, HIL_NETMASK, HIL_SRV,
+#      plus everything in hil.env (HIL_HOST_IP, HIL_BOARD_IP, HIL_NETMASK, HIL_SRV, HIL_RELEASES,
 #      HIL_CONSOLE, HIL_SSH_USER, HIL_SSH_KEY)
 #
 # Written for Ubuntu 22.04 with NetworkManager. Not covered: installing Vivado/Vitis
@@ -83,9 +83,10 @@ EOF
   sudo apt-get install -y dnsmasq nfs-kernel-server u-boot-tools device-tree-compiler picocom \
     openssh-client python3-pytest
 
-  step "4/10 Served directory $HIL_SRV"
-  # Owned by you, so staging a build only needs root for the rootfs (through hil-rootfs).
-  sudo install -d -o "$user" -g "$(id -gn)" "$HIL_SRV"
+  step "4/10 Served directory $HIL_SRV, release directory $HIL_RELEASES"
+  # Owned by you, so staging a build only needs root for the rootfs (through hil-rootfs),
+  # and make release writes its artifacts without sudo.
+  sudo install -d -o "$user" -g "$(id -gn)" "$HIL_SRV" "$HIL_RELEASES"
 
   step "5/10 $HIL_SRV mounted nosuid,nodev (bind mount onto itself)"
   # hil-rootfs extracts rootfs tarballs as root without a password. Set-uid files in a
@@ -182,6 +183,8 @@ verify() {
   else warn "no test login key at $HIL_SSH_KEY (run this script without --check)"; fi
   if sed "s|@HIL_SRV@|$HIL_SRV|" "$here/hil-rootfs" | cmp -s - "$helper"; then ok "$helper installed and current"
   else warn "$helper missing or older than tests/hil/scripts/hil-rootfs (run this script without --check)"; fi
+  if [ -d "$HIL_RELEASES" ] && [ -w "$HIL_RELEASES" ]; then ok "$HIL_RELEASES writable (make release)"
+  else warn "$HIL_RELEASES missing or not writable (run this script without --check)"; fi
   # -k: ignore cached credentials, so this tests the NOPASSWD rule itself.
   if sudo -n -k "$helper" check >/dev/null 2>&1; then ok "sudo allows $helper without a password"
   else warn "no password-free sudo rule for $helper (run this script without --check)"; fi

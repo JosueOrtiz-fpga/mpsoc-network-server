@@ -52,7 +52,12 @@ export KAS_IMAGE_VERSION := $(KAS_VERSION)
 export KAS_CONTAINER_IMAGE_DISTRO ?= debian-bookworm
 export KAS_WORK_DIR  ?= $(ROOT)/build/kas
 export KAS_BUILD_DIR ?= $(ROOT)/build/yocto
-# DL_DIR and SSTATE_DIR: export them (CI: persistent volumes); kas forwards them.
+# Downloads and shared state live outside the checkout, so a fresh one (make release
+# builds in a clean worktree) stays incremental. kas forwards both to BitBake, and
+# kas-container mounts them. CI: point them at persistent volumes.
+YOCTO_CACHE ?= $(HOME)/.cache/zub1cg-yocto
+export DL_DIR     ?= $(YOCTO_CACHE)/downloads
+export SSTATE_DIR ?= $(YOCTO_CACHE)/sstate-cache
 
 # Path of the repo as seen by commands running inside kas.
 ifneq ($(findstring kas-container,$(KAS)),)
