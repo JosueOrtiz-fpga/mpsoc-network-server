@@ -76,6 +76,8 @@ there (this needs sudo), and builds `out/hil/boot.scr`. `<id>` is the build's `g
 `-dirty` when the tree has local changes. A good run ends with `hil-stage: ready (...)` and no
 warnings. A warning means the host is missing its export or its `192.168.77.1` address.
 
+`make hil-stage WITH_PL=1` to copy PL overlay into NFS
+
 `make jtag-boot` then goes through these stages:
 
 1. Connects to `hw_server`, opens the CSU JTAG security gates so the PMU becomes visible, and
@@ -95,6 +97,16 @@ If U-Boot's autoboot does not run the script, press a key to stop autoboot and t
 
 ```
 source 0x20000000
+```
+
+## Loading PL Overlay
+
+```
+f=$(basename "$(ls -t /lib/firmware/*.dtbo | head -1)")
+echo $f
+sudo mkdir /sys/kernel/config/device-tree/overlays/pl
+echo "$f" | sudo tee /sys/kernel/config/device-tree/overlays/pl/path
+cat /sys/kernel/config/device-tree/overlays/pl/statuss
 ```
 
 ## Configuration
