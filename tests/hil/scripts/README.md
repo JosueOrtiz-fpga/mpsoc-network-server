@@ -15,7 +15,7 @@ All commands run from the repository root.
 | `netboot.cmd` | U-Boot script template: TFTP kernel and DTB, NFS root, `booti` |
 | `jtag-boot.tcl` | `xsdb` script: PMUFW, FSBL, DTB, boot script, U-Boot, TF-A |
 
-Make targets: `make hil-stage` (add `WITH_PL=1` to install the PL package) and `make jtag-boot`.
+Make targets: `make hil-stage` (stages the PL package too; `PL_STEM=<stem>` picks another one), `make jtag-boot`, and `make hil`, which does both and runs the pytest suite in `tests/hil/`.
 
 ## Bench setup
 
@@ -65,7 +65,7 @@ Two things the script cannot do for you:
 
 ```sh
 make sw-image          # once per change: BOOT.BIN, Image, system.dtb, rootfs, jtag/*.elf
-make hil-stage         # or: make hil-stage WITH_PL=1
+make hil-stage         # or: make hil-stage PL_STEM=<stem>
 picocom -b 115200 /dev/ttyUSB1      # in a second terminal, leave it open
 make jtag-boot
 ```
@@ -76,7 +76,9 @@ there (this needs sudo), and builds `out/hil/boot.scr`. `<id>` is the build's `g
 `-dirty` when the tree has local changes. A good run ends with `hil-stage: ready (...)` and no
 warnings. A warning means the host is missing its export or its `192.168.77.1` address.
 
-`make hil-stage WITH_PL=1` to copy PL overlay into NFS
+The PL package goes into the staged rootfs as well: the one `make hw-plpkg` recorded in
+`out/hw/pl/current`, or `PL_STEM=<stem>` for another package in `out/hw/pl/`. Its `.bit.bin`
+and `.dtbo` land in `/lib/firmware/`, with `pl-default.dtbo` pointing at the `.dtbo`.
 
 `make jtag-boot` then goes through these stages:
 
@@ -102,10 +104,9 @@ source 0x20000000
 ## Loading PL Overlay
 
 ```
-f=$(basename "$(ls -t /lib/firmware/*.dtbo | head -1)")
-echo $f
+readlink /lib/firmware/pl-default.dtbo      # the staged package
 sudo mkdir /sys/kernel/config/device-tree/overlays/pl
-echo "$f" | sudo tee /sys/kernel/config/device-tree/overlays/pl/path
+echo pl-default.dtbo | sudo tee /sys/kernel/config/device-tree/overlays/pl/path
 cat /sys/kernel/config/device-tree/overlays/pl/status
 ```
 

@@ -5,14 +5,15 @@ is loaded and a PL register read without it would probably hang the board, so ev
 test leaves the overlay loaded. Load/unload cycles leak a little kernel memory per
 cycle (section 5), hence the small count.
 
-Until pl-loader.service is in the image (R0 work package 5), the test loads the
-overlay itself; once the unit exists, it must have applied the overlay at boot.
+make hil-stage installs one PL package and points /lib/firmware/pl-default.dtbo at
+it. Until pl-loader.service is in the image, the test loads that overlay itself; once
+the unit exists, it must have applied the overlay at boot.
 """
 import time
 
-import pytest
 
 OVERLAY = "/sys/kernel/config/device-tree/overlays/pl"
+DEFAULT_DTBO = "pl-default.dtbo"   # in /lib/firmware, the staged package's overlay
 IIC_DEV = "/sys/bus/platform/devices/b0000000.i2c"
 IIC_BASE = 0xB000_0000
 IIC_SR = 0x104                 # AXI IIC status register; idle value 0xC0
@@ -24,16 +25,8 @@ def overlay_status(board):
     return board.run(f"cat {OVERLAY}/status 2>/dev/null || true").stdout.strip()
 
 
-def default_dtbo(board):
-    out = board.run("cd /lib/firmware && if [ -e pl-default.dtbo ]; then echo pl-default.dtbo; "
-                    "else ls *.dtbo 2>/dev/null; fi", check=False).stdout.split()
-    if len(out) != 1:
-        pytest.fail(f"expected one PL overlay in /lib/firmware, found {out or 'none'}", pytrace=False)
-    return out[0]
-
-
 def load(board):
-    board.sudo(f"mkdir {OVERLAY} && printf %s {default_dtbo(board)} > {OVERLAY}/path")
+    board.sudo(f"mkdir {OVERLAY} && printf %s {DEFAULT_DTBO} > {OVERLAY}/path")
 
 
 def unload(board):
@@ -70,7 +63,10 @@ def check_unloaded(board):
     assert board.run(f"test -e {IIC_DEV}", check=False).returncode != 0, f"{IIC_DEV} still present"
 
 
-def test_pl_load(board):
+def test_pl_load(board, hil_env):
+    target = board.run(f"readlink /lib/firmware/{DEFAULT_DTBO}", check=False).stdout.strip()
+    assert target == f"{hil_env['HIL_PL_STEM']}.dtbo", \
+        f"/lib/firmware/{DEFAULT_DTBO} -> {target or 'nothing'}, staged {hil_env['HIL_PL_STEM']}"
     if has_loader(board):
         assert overlay_status(board) == "applied", "pl-loader.service did not apply the PL overlay at boot"
     else:

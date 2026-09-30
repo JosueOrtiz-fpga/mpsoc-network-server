@@ -4,7 +4,9 @@
 #   out/sw/Image, system.dtb   -> $HIL_SRV/<id>/          (TFTP)
 #   out/sw/rootfs.tar.gz       -> $HIL_SRV/<id>/rootfs/   (NFS root, extracted as root)
 #   tests/hil/scripts/netboot.cmd         -> out/hil/boot.scr        (loaded over JTAG by jtag-boot.tcl)
-#   --with-pl: out/hw/pl/*.bit.bin + *.dtbo -> rootfs/lib/firmware/
+#   out/hw/pl/<stem>.bit.bin + .dtbo      -> rootfs/lib/firmware/, with pl-default.dtbo
+#                                            pointing at the .dtbo; <stem> is the one in
+#                                            out/hw/pl/current (make hw-plpkg) or --pl-stem
 #   test login: $HIL_SSH_KEY.pub for $HIL_SSH_USER, no forced password change, sudo
 #               without a password (in the staged rootfs only, never in the image)
 #
@@ -14,7 +16,7 @@
 # hil-rootfs, which setup-host.sh installs with a password-free sudo rule, so this
 # script runs unattended.
 #
-# Usage: tests/hil/scripts/stage-netboot.sh [--with-pl] [out-sw-dir]
+# Usage: tests/hil/scripts/stage-netboot.sh [--pl-stem <stem>] [out-sw-dir]
 set -euo pipefail
 
 die() { echo "hil-stage: ERROR: $*" >&2; exit 1; }
@@ -26,11 +28,12 @@ root=$(cd "$here/../../.." && pwd)
 . "$here/hil.env"
 helper=/usr/local/sbin/hil-rootfs
 
-with_pl=0
-if [ "${1:-}" = --with-pl ]; then with_pl=1; shift; fi
-[ $# -le 1 ] || die "usage: $0 [--with-pl] [out-sw-dir]"
+pl_stem=
+if [ "${1:-}" = --pl-stem ]; then pl_stem=${2:?--pl-stem needs a stem}; shift 2; fi
+[ $# -le 1 ] || die "usage: $0 [--pl-stem <stem>] [out-sw-dir]"
 sw=$(realpath "${1:-$root/out/sw}")
 out_hil="$root/out/hil"
+pl_dir="$root/out/hw/pl"
 
 # ---- inputs -----------------------------------------------------------------------
 for f in Image system.dtb rootfs.tar.gz manifest.txt SHA256SUMS \
@@ -41,6 +44,15 @@ command -v mkimage >/dev/null || die "mkimage not found (Debian/Ubuntu: apt inst
 [ -d "$HIL_SRV" ] && [ -w "$HIL_SRV" ] \
   || die "$HIL_SRV missing or not writable (one-time host setup in tests/hil/scripts/README.md)"
 [ -f "$HIL_SSH_KEY.pub" ] || die "no $HIL_SSH_KEY.pub (run tests/hil/scripts/setup-host.sh)"
+
+# PL package: the last make hw-plpkg, unless --pl-stem (PL_STEM=) names another one.
+if [ -z "$pl_stem" ]; then
+  [ -f "$pl_dir/current" ] || die "no $pl_dir/current (run 'make hw-plpkg', or pick a package with PL_STEM=)"
+  pl_stem=$(cat "$pl_dir/current")
+fi
+for f in "$pl_stem.bit.bin" "$pl_stem.dtbo"; do
+  [ -f "$pl_dir/$f" ] || die "no PL package file $pl_dir/$f (packages: $(cd "$pl_dir" 2>/dev/null && ls *.dtbo 2>/dev/null | sed 's/\.dtbo$//' | tr '\n' ' '))"
+done
 
 # The installed helper must be this repo's version, and sudo must allow it without a
 # password (-k ignores cached credentials, so a recent sudo elsewhere cannot hide a
@@ -77,14 +89,8 @@ install -m 0644 "$sw/Image" "$sw/system.dtb" "$dest/"
 say "extracting rootfs"
 sudo -n "$helper" extract "$id" "$sw/rootfs.tar.gz"
 
-if [ "$with_pl" = 1 ]; then
-  shopt -s nullglob
-  pl=("$root"/out/hw/pl/*.bit.bin "$root"/out/hw/pl/*.dtbo)
-  shopt -u nullglob
-  [ ${#pl[@]} -gt 0 ] || die "--with-pl: nothing in out/hw/pl (run 'make hw-plpkg')"
-  sudo -n "$helper" firmware "$id" "${pl[@]}"
-  say "PL package: ${pl[*]##*/}"
-fi
+sudo -n "$helper" pl-package "$id" "$pl_dir/$pl_stem.bit.bin" "$pl_dir/$pl_stem.dtbo"
+say "PL package: $pl_stem (pl-default.dtbo)"
 
 say "test login: $HIL_SSH_USER with $HIL_SSH_KEY"
 sudo -n "$helper" seed-login "$id" "$HIL_SSH_USER" "$HIL_SSH_KEY.pub"
@@ -102,7 +108,7 @@ sed -e "s|@HIL_ID@|$id|g" \
 mkimage -A arm64 -O linux -T script -C none -n "netboot $id" \
   -d "$out_hil/netboot.cmd" "$out_hil/boot.scr" >/dev/null
 install -m 0644 "$out_hil/boot.scr" "$dest/boot.scr"   # reference copy next to the build
-printf 'HIL_ID=%s\nHIL_DIR=%s\n' "$id" "$dest" > "$out_hil/stage.env"
+printf 'HIL_ID=%s\nHIL_DIR=%s\nHIL_PL_STEM=%s\n' "$id" "$dest" "$pl_stem" > "$out_hil/stage.env"
 
 # ---- host sanity (warnings only) ---------------------------------------------------------
 grep -qsE "^[[:space:]]*$HIL_SRV([[:space:]]|$)" /etc/exports /etc/exports.d/*.exports \

@@ -49,7 +49,7 @@ HW_SRCS := $(wildcard $(HW_DIR)/bd/*.tcl) \
 # Own RTL for linting; generated BD wrappers need Vivado libraries.
 LINT_SRCS := $(filter-out %_wrapper.v,$(wildcard $(HW_DIR)/rtl/*.v $(HW_DIR)/rtl/*.sv))
 
-.PHONY: all lint sim project bit xsa plpkg wrapper clean check-vivado
+.PHONY: all lint sim project bit xsa plpkg stem wrapper clean check-vivado
 
 all: xsa plpkg
 
@@ -95,6 +95,10 @@ $(XSA) $(XSA_BIT) &: $(BIT) | check-vivado
 	@echo "XSA: $(XSA)"
 
 plpkg: $(PL_BIN)
+
+# The name the XSA, bitstream and PL package of this tree share (top-level hw-plpkg).
+stem:
+	@echo $(XSA_STEM)
 
 $(PL_BIN): $(XSA_BIT)
 	$(HW_DIR)/scripts/mk_plpkg.sh $(XSA_BIT) $(OUT_DIR)/pl

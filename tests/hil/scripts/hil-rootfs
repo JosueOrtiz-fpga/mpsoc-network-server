@@ -16,7 +16,7 @@
 # Usage (through sudo):
 #   hil-rootfs check                                  exits 0: tests the sudo rule
 #   hil-rootfs extract    <id> <rootfs.tar.gz>        fresh rootfs from the tarball
-#   hil-rootfs firmware   <id> <file>...              .bit.bin / .dtbo -> /lib/firmware
+#   hil-rootfs pl-package <id> <x.bit.bin> <x.dtbo>   -> /lib/firmware, pl-default.dtbo -> x.dtbo
 #   hil-rootfs seed-login <id> <user> <public-key>    test login, see cmd_seed_login
 set -euo pipefail
 
@@ -67,18 +67,24 @@ cmd_extract() {
   tar --numeric-owner -xpzf "$2" -C "$d/rootfs"
 }
 
-cmd_firmware() {
-  [ $# -ge 2 ] || die "usage: hil-rootfs firmware <id> <file>..."
-  local d r fw f
-  d=$(stage_dir "$1"); shift
+# One PL package into /lib/firmware, and pl-default.dtbo (what pl-loader.service applies)
+# pointing at its overlay. Both files share a stem, as make hw-plpkg names them.
+cmd_pl_package() {
+  [ $# -eq 3 ] || die "usage: hil-rootfs pl-package <id> <x.bit.bin> <x.dtbo>"
+  local d r fw bin=$2 dtbo=$3 stem
+  d=$(stage_dir "$1")
   r=$(rootfs_of "$d")
-  for f in "$@"; do
-    case "$f" in *.bit.bin|*.dtbo) ;; *) die "$f: only .bit.bin and .dtbo files go to /lib/firmware" ;; esac
-    user_file "$f"
-  done
+  case "$bin" in *.bit.bin) ;; *) die "$bin: not a .bit.bin" ;; esac
+  case "$dtbo" in *.dtbo) ;; *) die "$dtbo: not a .dtbo" ;; esac
+  stem=$(basename "$bin" .bit.bin)
+  [ "$(basename "$dtbo" .dtbo)" = "$stem" ] || die "$bin and $dtbo are not one package"
+  [ "$stem" != pl-default ] || die "a package cannot be named pl-default"
+  user_file "$bin"
+  user_file "$dtbo"
   fw=$(inside "$r/lib/firmware" "$r")
   install -d -m 0755 "$fw"
-  install -m 0644 -o root -g root "$@" "$fw/"
+  install -m 0644 -o root -g root "$bin" "$dtbo" "$fw/"
+  ln -sfn "$stem.dtbo" "$fw/pl-default.dtbo"
 }
 
 # Test login for <user> in the staged rootfs only, never in the image:
@@ -137,7 +143,7 @@ cmd_seed_login() {
 case "${1:-}" in
   check)      echo "hil-rootfs: ok" ;;
   extract)    shift; cmd_extract "$@" ;;
-  firmware)   shift; cmd_firmware "$@" ;;
+  pl-package) shift; cmd_pl_package "$@" ;;
   seed-login) shift; cmd_seed_login "$@" ;;
-  *)          die "usage: hil-rootfs {check|extract|firmware|seed-login} ..." ;;
+  *)          die "usage: hil-rootfs {check|extract|pl-package|seed-login} ..." ;;
 esac
