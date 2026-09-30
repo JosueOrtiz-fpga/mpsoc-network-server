@@ -67,7 +67,8 @@ say "building $tag in $wt (full log: $log)"
 start=$(date -u +%s)
 # One && chain: set -e does not apply inside a command whose status || tests.
 sdk_on=${RELEASE_SDK:-0}
-build="make -C $wt hw-lint hw-sim hw-xsa hw-plpkg platform-check sw-image$([ "$sdk_on" = 1 ] && echo " sw-sdk")"
+build="make -C $wt hw-lint hw-sim hw-xsa hw-plpkg platform-check sw-image"
+if [ "$sdk_on" = 1 ]; then build+=" sw-sdk"; fi
 hil="make -C $wt hil"
 { echo "+ $build" && $build && echo "+ $hil" && $hil; } > >(tee "$log") 2>&1 \
   || die "build or HIL suite failed; the worktree and $log stay for inspection"
