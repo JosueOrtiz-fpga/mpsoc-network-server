@@ -33,7 +33,7 @@ The board produces a stream of HF I/Q samples from a synthetic test source in th
 
 The stream format is **DIFI** (IEEE-ISTO Std 4900-2021, conformance target v1.2.1, see [Standard version](#standard-version)), a published, constrained profile of ANSI/VITA 49.2. DIFI pins down the packet types, prologue fields, timestamp modes and sample format. The reference receiver is GNU Radio with the `gr-difi` out-of-tree module, the only mainstream open-source SDR stack that ingests this format natively.
 
-In scope: the PL signal chain and packetizer, the PS control plane and UDP transport, and the host-side receive chain. Out of scope for now: VITA 49.2 command/control packets over the network, transmit, multiple channels, and PTP time transfer.
+In scope: the PL signal chain and packetizer, the PS control plane and UDP transport, and the host-side receive chain. Out of scope and not planned: VITA 49.2 command/control packets over the network, transmit, multiple channels, and PTP time transfer to the PL timebase. Features planned beyond the baseline are listed under [Future features](#future-features).
 
 ---
 
@@ -387,7 +387,7 @@ The timebase is a counter in the `FS_IN` clock domain. Each clock it adds `TB_IN
 
 An earlier draft put the DDC delay in the context packet's Timestamp Adjustment field instead. DIFI gives that field a different meaning: the delay from the reference point (the RF input) to the SID location. For the test source it is 0.
 
-The driver seeds the timebase from the Linux system clock (NTP or PTP disciplined) with `LOAD_NOW`, giving accuracy of a few milliseconds, and updates `CTX_TS_CAL_TIME` after each seed. Lock state is not signalled in the stream: State and Event indicators are not supported, and the word is always 0 (see the deviation note under [Standard version](#standard-version)).
+The driver seeds the timebase from the Linux system clock, NTP-disciplined (for example chrony, with LNXPC or an internet server as the source), with `LOAD_NOW`, giving accuracy of a few milliseconds, and updates `CTX_TS_CAL_TIME` after each seed. Lock state is not signalled in the stream: State and Event indicators are not supported, and the word is always 0 (see the deviation note under [Standard version](#standard-version)).
 
 ---
 
@@ -419,7 +419,7 @@ The PL FIFO only needs to cover DMA descriptor turnaround, not Linux scheduling 
 
 Full hardware offload would need a UDP/IP stack and MAC in the PL plus a second PHY on an expansion connector. The ZU1 appears to have no PL multi-gigabit transceivers _(verify)_, so that would mean an RGMII PHY on HSIO. It is not justified at these rates.
 
-**Keep the control plane internal.** VITA 49.2 defines control and acknowledge packets for configuring radios over the network, and this register bank is the natural backend for them later. `gr-difi` does not use them, so no network control endpoint is built until something needs one, and raw register access is never exposed over the network.
+**Keep the control plane internal.** VITA 49.2 defines control and acknowledge packets for configuring radios over the network. `gr-difi` does not use them, and none are planned: no network control endpoint is built, and raw register access is never exposed over the network.
 
 **Keep a software reference packetizer.** A host-side reference implementation that turns the same input samples into packets is the most valuable test asset in this design. Bit-exact diffs against PL output catch packetizer bugs before GNU Radio is involved.
 
