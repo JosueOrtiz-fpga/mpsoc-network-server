@@ -2,7 +2,7 @@
 
 Release plan for the DIFI streaming baseline in [`difi-streaming-architecture.md`](difi-streaming-architecture.md), from the current bench state (`edf-2026_1-followups.md`, rev D) to v1.0.0. Every release runs on the board, passes the HIL suite and is tagged. No release waits for the full feature set.
 
-> **Status:** proposal. Effort figures are estimates for one developer (see [Planning assumptions](#planning-assumptions)). The releases implement the approved architecture and do not change it. Where a release implements only part of a behaviour, [Interim behaviour](#interim-behaviour) says what that build does instead.
+> **Status:** approved (30 September 2026); R0 and B2 amended the same day (PL package staged by `make hil` until B2, see [Decisions](#decisions)). Effort figures are estimates for one developer (see [Planning assumptions](#planning-assumptions)). The releases implement the approved architecture and do not change it. Where a release implements only part of a behaviour, [Interim behaviour](#interim-behaviour) says what that build does instead.
 
 ---
 
@@ -17,7 +17,7 @@ Release plan for the DIFI streaming baseline in [`difi-streaming-architecture.md
 - [Release process](#release-process)
 - [Schedule risks](#schedule-risks)
 - [Deferred](#deferred)
-- [Open decisions](#open-decisions)
+- [Decisions](#decisions)
 
 ---
 
@@ -25,8 +25,8 @@ Release plan for the DIFI streaming baseline in [`difi-streaming-architecture.md
 
 The architecture contains one tangle of dependencies that would otherwise force a big-bang first release. The packetizer needs the register bank, the timebase and a sample source. Seeing its output needs the DMA ring, a driver and the UDP sender. GNU Radio needs valid context packets. Runtime retunes need all of that plus the DDC. Five rules break the tangle:
 
-1. **Release machinery first.** R0 finishes CI, HIL automation and release packaging on the design that already works (AXI IIC and temperature sensor), before any DIFI RTL. From then on, every increment is shippable by construction.
-2. **Freeze the PS once.** Every PS configuration change the baseline needs (`S_AXI_HPC0`, its coherency settings, the PS side of MIO34 ownership) lands in one release, R1. After that, per [What rebuilds when](../README.md#what-rebuilds-when), each DIFI release is a PL package, an overlay or software. `platform/` stays unchanged, Stage 2 stays incremental, and HIL keeps exercising the same PS configuration.
+1. **Release machinery first.** R0 finishes HIL automation and release packaging on the design that already works (AXI IIC and temperature sensor), before any DIFI RTL. From then on, every increment ships through the same scripted build and test.
+2. **Freeze the PS once.** Every PS configuration change the baseline needs (`S_AXI_HPC0`, its coherency settings, the PS side of MIO34 ownership) lands in one release, R1. After that, per [What rebuilds when](../README.md#what-rebuilds-when), each DIFI release is a PL package, an overlay or software. `platform/` stays unchanged, the Yocto build stays incremental, and HIL keeps exercising the same PS configuration.
 3. **Thin end-to-end path before breadth.** The first stream uses the counter ramp, which bypasses the DDC, and settings that change only while disabled. It reaches GNU Radio (R3) before the DDC (R4), runtime commits (R5) and time discipline (R6) are added, so each of those lands on a path that is already tested end to end.
 4. **Let the register map carry the staging.** `CAPS`, the `SRC_SEL` rejection (`0x05`), the locked-register rejection (`0x03`) and the State and Event lock indicator already let a build report what it lacks. Interim builds use these mechanisms instead of interim-only registers. Every packet an interim release emits is therefore valid DIFI and truthful: unsteered time, for example, is reported as not locked. The `VERSION` minor number tells the driver which baseline behaviour the PL implements.
 5. **One hard problem per release.** Coherent DMA (R1), bit-exact packetizing (R2), the kernel ring (R3), the DSP chain (R4) and signal-aligned commits (R5) each get a release of their own, so a slip in one does not hold the others hostage.
@@ -40,7 +40,7 @@ HIL tests accumulate: every release runs all earlier tests as regression.
 - One developer at about **10 focused hours per week**. Calendar figures scale linearly with that rate; at 5 h/week, double them.
 - Effort ranges include simulation, HIL tests and documentation for the release, and assume the bench and toolchain keep working as at rev D of the follow-ups. Vivado and Yocto build time is not counted; interleaving hardware-free work during builds is how that time gets used (see [Parallel tracks](#parallel-tracks)).
 - Start: week of 5 October 2026.
-- **LNXPC is the runner host and hosts the HIL bench.** R3's interoperability tests (headless `gr-difi`, capture on the HIL NIC) and every demo run there.
+- **LNXPC is the build host and hosts the HIL bench.** R3's interoperability tests (headless `gr-difi`, capture on the HIL NIC) and every demo run there.
 - Releases are cut when their exit criteria pass, not on a date. The calendar is for planning only.
 
 ---
@@ -65,17 +65,17 @@ Board-track items B1 and B2 (see [Parallel tracks](#parallel-tracks)) are schedu
 
 | Step | Effort (h) | Cumulative (h) | Done after (weeks) | Calendar at 10 h/week | Rebuild |
 |---|---|---|---|---|---|
-| R0 Bench baseline | 45–65 | 45–65 | 5–7 | Nov 2026 | PL package and rootfs (no PS change) |
-| M1 Reference model | 25–35 | 70–100 | 7–10 | Nov–Dec 2026 | None (host only) |
-| B1 Unattended recovery | 8–14 | 78–114 | 8–11 | Nov–Dec 2026 | None (bench) |
-| R1 Platform freeze | 70–100 | 148–214 | 15–21 | Jan–Mar 2027 | **Full, including BOOT.BIN** |
-| R2 First packets | 65–95 | 213–309 | 21–31 | Mar–May 2027 | PL package and apps |
-| R3 Live stream (bench-only) | 70–100 | 283–409 | 28–41 | Apr–Jul 2027 | Overlay and software (bitstream unchanged) |
-| B2 Standalone board | 20–35 | 303–444 | 30–44 | May–Aug 2027 | BOOT.BIN (PMUFW only) and BSP |
-| R4 Tones and DDC | 90–130 | 393–574 | 39–57 | Jul–Nov 2027 | PL package and driver |
-| R5 Live retune | 50–80 | 443–654 | 44–65 | Aug 2027–Jan 2028 | PL package and driver |
-| R6 Disciplined time | 35–55 | 478–709 | 48–71 | Sep 2027–Feb 2028 | Driver and image only |
-| R7 Baseline complete | 30–45 | 508–754 | 51–75 | Sep 2027–Mar 2028 | FIFO sizing, docs |
+| R0 Bench baseline | 36–61 | 36–61 | 4–7 | Nov 2026 | PL package and rootfs (loader; no PS change) |
+| M1 Reference model | 25–35 | 61–96 | 7–10 | Nov–Dec 2026 | None (host only) |
+| R1 Platform freeze | 70–100 | 131–196 | 14–20 | Jan–Feb 2027 | **Full, including BOOT.BIN** |
+| R2 First packets | 65–95 | 196–291 | 20–30 | Feb–May 2027 | PL package and apps |
+| B1 Unattended recovery | 8–14 | 204–305 | 21–31 | Mar–May 2027 | None (bench) |
+| R3 Live stream (bench-only) | 70–100 | 274–405 | 28–41 | Apr–Jul 2027 | Overlay and software (bitstream unchanged) |
+| B2 Standalone board | 22–39 | 296–444 | 30–45 | May–Aug 2027 | BOOT.BIN (PMUFW only), BSP and SD image |
+| R4 Tones and DDC | 90–130 | 386–574 | 39–58 | Jul–Nov 2027 | PL package and driver |
+| R5 Live retune | 50–80 | 436–654 | 44–66 | Aug 2027–Jan 2028 | PL package and driver |
+| R6 Disciplined time | 35–55 | 471–709 | 48–71 | Sep 2027–Feb 2028 | Driver and image only |
+| R7 Baseline complete | 30–45 | 501–754 | 51–76 | Sep 2027–Mar 2028 | FIFO sizing, docs |
 
 The Rebuild column shows rule 2 at work: after R1, no release touches the PS configuration.
 
@@ -87,14 +87,14 @@ gantt
   dateFormat YYYY-MM-DD
   axisFormat %b %Y
   section Foundation
-  R0 Bench baseline           :r0, 2026-10-05, 38d
+  R0 Bench baseline           :r0, 2026-10-05, 34d
   M1 Reference model          :m1, after r0, 21d
-  B1 Unattended recovery      :b1, after m1, 8d
-  R1 Platform freeze          :r1, after b1, 59d
+  R1 Platform freeze          :r1, after m1, 59d
   section Thin stream
   R2 First packets            :r2, after r1, 56d
-  R3 Live stream              :r3, after r2, 59d
-  B2 Standalone board         :b2, after r3, 19d
+  B1 Unattended recovery      :b1, after r2, 8d
+  R3 Live stream              :r3, after b1, 59d
+  B2 Standalone board         :b2, after r3, 21d
   section Signal and time
   R4 Tones and DDC            :r4, after b2, 77d
   R5 Live retune              :r5, after r4, 46d
@@ -157,23 +157,27 @@ flowchart LR
 
 ### R0: Bench baseline (v0.1.0)
 
-**Goal.** Turn the working manual bench into an automated, tagged release, so every later increment ships through the same pipeline.
+**Goal.** Turn the working manual bench into a scripted, HIL-tested, tagged release, so every later increment ships through the same steps.
 
 **Scope.**
 
-- **Close out rev D.** Commit the AXI IIC interrupt change, `tests/hil/scripts/` and the `hil-stage` / `jtag-boot` targets. Rebuild the PL package from a clean tree, so the stem loses `-dirty`.
-- **PL package in the rootfs.** A recipe in `meta-<project>` installs `<stem>.bit.bin` and `<stem>.dtbo` under `/lib/firmware/`. A boot-time loader (systemd unit or `dfx-mgr`) applies the default overlay and keeps it loaded, because the PL clock stops when it is removed.
-- **Overlay fragment mechanism.** Project-owned `.dtso` fragments are merged into Lopper's `pl.dtso` at the overlay step. First user: the STTS22H child node at 0x3f. Later users: `generic-uio` bindings and `dma-coherent` (R1), the driver's compatible string (R3). The overlay step must be able to re-run against a stored XSA without Vivado, so that an overlay-only release (R3) skips Stage 1's Vivado build.
-- **Automation login.** Test-only credentials or an SSH key, seeded by `stage-netboot.sh` so that `make hil-stage` no longer resets them.
-- **labgrid and `make hil`.** JTAG boot through `jtag-boot.tcl`, console on UART0, reset with `rst -system`.
-- **HIL tests.** `test_boot`; `test_pl_load` and `test_pl_regs` as specified in the follow-ups, section 3 (AXI IIC `SR` reads `0xC0`, sensor WHOAMI `0xA0`, temperature in a sane range).
-- **GitLab CI.** The thin `.gitlab-ci.yml` from the README, one runner with a shell executor carrying all three tags, `resource_group: zuboard`. Vivado installed on the runner host is fine for now (see [Deferred](#deferred)).
-- **Release packaging.** A tag job that collects BOOT.BIN, WIC, kernel, DTB, rootfs, PL package, SDK, `manifest.txt`, `layers.lock.yml`, `SHA256SUMS` and the HIL reports into `/srv/ci-artifacts/<tag>/`, and a release-notes template (see [Release process](#release-process)).
-- **Housekeeping.** The follow-ups section 4 items that touch what R0 ships: README layout and CI sections, Makefile `help` and `.PHONY`.
+- **Close out rev D.** Commit the AXI IIC interrupt change, `tests/hil/scripts/`, the `hil-stage` / `jtag-boot` targets and this plan. Rebuild the PL package from a clean tree, so the stem loses `-dirty`.
+- **Product layer and boot-time PL loader.** Create `sw/meta-zub1cg-app`, added in `sw/kas/image.yml` only, so the boot firmware build keeps its layer set. It carries a systemd unit that applies `/lib/firmware/pl-default.dtbo` under a fixed configfs overlay name at boot and keeps it loaded, because the PL clock stops when the overlay is removed. With no `pl-default.dtbo` present, the unit logs that and succeeds, so an image without a PL package still boots cleanly. The image carries the loader only: no PL package enters a Yocto build before B2.
+- **PL package staging.** `hw-plpkg` records the stem it produced (`out/hw/pl/current`). `make hil-stage` always installs that package into the staged NFS rootfs under `/lib/firmware/` and points `pl-default.dtbo` at it; `PL_STEM=` selects another package, and `WITH_PL=1` goes away. A PL-only change therefore reaches the board through `make hil` on the last image, without a Yocto build, as [What rebuilds when](../README.md#what-rebuilds-when) intends. The live PL iteration procedure (follow-ups, section 7) keeps working.
+- **Overlay fragment mechanism.** Project-owned `.dtso` fragments are merged into Lopper's `pl.dtso` at the overlay step. First user: the STTS22H child node at 0x3f. Later users: `generic-uio` bindings and `dma-coherent` (R1), the driver's compatible string (R3). The merge has to land inside the fragment Lopper generates: the kernel rejects two fragments that add the same node, and a `&label` reference to a node defined in the same overlay resolves to the overlay's own copy instead of the live tree _(verify against a generated `pl.dtso`; fallback: a second overlay applied after the PL overlay)_. The overlay step must re-run against a stored XSA without a Vivado build (SDTGen needs only the Vivado install), so that an overlay-only release (R3) reuses the R2 bitstream. Because the overlay then changes while the bitstream stem does not, the `.dtbo` name carries its own suffix, and the pairing check in the top-level Makefile reads `firmware-name` from each `.dtbo` instead of matching file names. Check whether the kernel has an STTS22H driver; if one binds, the tests read the sensor through that driver or with `i2cget -f`.
+- **Automation login.** `stage-netboot.sh` seeds a test-only SSH key into the staged rootfs, clears the forced password change (sshd with PAM enforces it even for key logins) and gives the test account `sudo` without a password. Test credentials stay out of the image and the WIC, and `make hil-stage` no longer resets them. `setup-host.sh` adds a host sudoers rule limited to the staging's rootfs extraction, so `make hil` needs no password on LNXPC.
+- **`make hil`.** Stages the build and the PL package, JTAG-boots it through `jtag-boot.tcl` (reset with `rst -system`), logs the UART0 console from before the boot (a stable `/dev/serial/by-id/` path in `hil.env`), falls back to `source 0x20000000` if U-Boot stops at its prompt, waits for the login prompt and runs the pytest suite in `tests/hil/` over SSH. A small project fixture (pyserial for the console, SSH for commands) does the job labgrid was planned for. Every step has a timeout; a timeout fails the run with the console log attached. The console log and the JUnit report go to `out/hil/<id>/`, also on failure.
+- **HIL tests.** `test_boot`: login prompt within the timeout; no oops, panic or `BUG:` in the console log. `test_pl_load` and `test_pl_regs` as specified in the follow-ups, section 3, adapted to the loader: `test_pl_load` first checks the overlay the loader applied at boot, then cycles that same overlay a few times and always leaves it loaded; `test_pl_regs` runs after it, checks that `pl0_ref` is enabled, and reads AXI IIC `SR` (`0xC0`), sensor WHOAMI (`0xA0`) and a temperature in a sane range.
+- **Release packaging.** A `make release` target that refuses local changes or untracked files (`git status --porcelain`; the `-dirty` check in `hw/Makefile` ignores untracked files) and a HEAD without the release tag, and builds in a clean worktree of the tag. Yocto `DL_DIR` and `SSTATE_DIR` move to persistent paths on LNXPC, so that clean build stays incremental. It runs `hw-lint`, `hw-sim`, `hw-xsa`, `hw-plpkg`, `platform-check`, `sw-image`, `sw-sdk` and `make hil`, and on a pass collects BOOT.BIN, WIC, kernel, DTB, rootfs, PL package (`.bit.bin`, `.dtbo`, `.dtso`), the XSA (the input of later overlay-only releases), SDK, `manifest.txt`, `layers.lock.yml`, `SHA256SUMS` and the HIL reports into `/srv/releases/<tag>/`, never overwriting an existing directory. `setup-host.sh` creates `/srv/releases`. A release-notes template (see [Release process](#release-process)); until B2 the notes state that the WIC carries no PL package.
+- **Housekeeping.** The follow-ups section 4 items that touch what R0 ships: the README layout section; the README CI section marked as deferred, its "What rebuilds when" table restated in `make`-target terms (a PL-only change: `hw-xsa`, `hw-plpkg`, `make hil` on the last image) and its labgrid references updated; Makefile `help` and `.PHONY`.
 
-**Exit criteria.** A `v0.1.0` tag pipeline runs all three stages unattended and passes. `test_pl_load` and `test_pl_regs` pass after a boot that uses the recipe-installed loader, without `WITH_PL=1` staging.
+**Exit criteria.**
 
-**Not in this release.** Any PS change; SD-card boot (B2).
+- `make release` for `v0.1.0` runs the full build and the HIL suite unattended from a clean checkout and passes.
+- `test_pl_load` and `test_pl_regs` pass after a boot in which the image's loader applies the PL package that `make hil` staged, with no manual step.
+- A PL-only rebuild reaches the board through `make hil` without a Yocto build.
+
+**Not in this release.** Any PS change; SD-card boot and the PL package in the SD image (B2).
 
 ### M1: Reference model and receiver pre-check (host only)
 
@@ -184,7 +188,7 @@ flowchart LR
 - `sw/apps/difi-ref/`: Python reference packetizer (data and context packets from register values and input samples, with change indicator and timestamps), packet checker (context rules, count continuity, timestamp monotonicity, context fields derived from the committed registers), capture reader (pcap and raw DMA dumps) and a UDP replay tool.
 - `third_party/DIFI-Certification` submodule at `6ee49d1e`. Every generated packet passes the Construct `validate()` functions, and the checker parses the three reference captures.
 - Receiver pre-check on LNXPC: a headless `gr-difi` flowgraph fed by the reference model over UDP.
-- A host-only CI job that runs the `difi-ref` tests on every change.
+- A `make ref-test` target that runs the `difi-ref` tests on the host; `make release` runs it too.
 
 **Exit criteria.** The pre-check passes: `gr-difi` accepts the packets without errors and produces a tone at the expected frequency. If it rejects anything, settle it here, before RTL.
 
@@ -219,12 +223,12 @@ flowchart LR
 - **Packetizer.** Data and context packets as specified; whole-packet admission (a packet starts only when the FIFO has room for all of it); overflow handling (whole-packet drops, continuing packet count, context before resume, counters); context on `ENABLE`; periodic context via `CTX_INTERVAL`; `FORCE_CONTEXT`; `TS_PIPE_DELAY_PS` subtraction (0 on hardware in this release, non-zero in simulation). `VERSION` 1.1.0.
 - **Ramp pacing.** A stand-in for the DDC's output valid strobe, one pulse per `DDC_DECIM` input clocks, so the ramp runs at the real output rates and the context sample rate is correct. R4 replaces it with the DDC.
 - **Software.** `difi-uio` runs the full initialization sequence, including the timebase seed from the Linux clock, and writes captures as pcap for the M1 tools.
-- **Bench.** The runner serves NTP on the HIL link (chrony, `192.168.77.0/24`), so the board's clock, and therefore the seed, is real.
+- **Bench.** The bench host serves NTP on the HIL link (chrony, `192.168.77.0/24`), so the board's clock, and therefore the seed, is real.
 
 **Exit criteria.**
 
 - cocotb: packetizer bit-exact against the reference model; context rules; overflow; timebase load. Every simulated packet passes `validate()`.
-- `test_difi_capture`: a single-shot capture of 1000 packets at each of the six main decimations passes the checker. Context comes first with the change indicator set; counts are continuous; consecutive data timestamps differ by exactly `SAMPLES_PER_PKT` × `DDC_DECIM` timebase increments, to within 1 ps; context fields match the committed registers. Once the descriptor chain ends, the stalled DMA overflows the FIFO; after re-arming, the ramp gaps equal `CNT_DROPPED_SAMPLES` and a context packet precedes the resumed data. Captures reach the runner through the NFS root.
+- `test_difi_capture`: a single-shot capture of 1000 packets at each of the six main decimations passes the checker. Context comes first with the change indicator set; counts are continuous; consecutive data timestamps differ by exactly `SAMPLES_PER_PKT` × `DDC_DECIM` timebase increments, to within 1 ps; context fields match the committed registers. Once the descriptor chain ends, the stalled DMA overflows the FIFO; after re-arming, the ramp gaps equal `CNT_DROPPED_SAMPLES` and a context packet precedes the resumed data. Captures reach the bench host through the NFS root.
 - Demo: a board capture replayed from LNXPC into `gr-difi` shows the ramp.
 
 **Not in this release.** Continuous streaming, tones, runtime commits. Every commit that changes a setting while running is rejected with `0x03`.
@@ -237,17 +241,17 @@ flowchart LR
 
 - **Kernel driver** `difi-ctrl` (`recipes-kernel/difi-ctrl/`): register bank, DMA through dmaengine, interrupt, character device (`ioctl` for configuration, `mmap` for the ring and status page, `poll` for completions), ring ownership as specified, and a `remove` path that stops the stream and releases the ring before the overlay goes. Initialization and shutdown follow the architecture's sequences. An overlay fragment moves the bank from `generic-uio` to the driver; the bitstream does not change.
 - **UDP sender** (`sw/apps/difi-sender/`): `sendmmsg`, length check against the header size field, ring high-water mark, systemd unit, `/etc/difi-sender.conf`.
-- **Runner.** GNU Radio and `gr-difi` installed, `net.core.rmem_max` raised, capture permission on the HIL NIC for CI jobs.
+- **Bench host.** GNU Radio and `gr-difi` installed, `net.core.rmem_max` raised, capture permission on the HIL NIC for the user that runs `make hil`.
 - `difi-uio` stays as a debug tool for use with the driver unbound.
 
 **Exit criteria.**
 
-- `test_difi_stream` as specified in the architecture: ramp source, capture on the runner's HIL NIC, every packet checked against the reference model, gaps matching `CNT_DROPPED_SAMPLES`.
-- Interoperability, ramp form: headless `gr-difi` on the runner, no missed-packet tags over 10 minutes at 1.92 MS/s; sender length-mismatch count 0.
+- `test_difi_stream` as specified in the architecture: ramp source, capture on the bench host's HIL NIC, every packet checked against the reference model, gaps matching `CNT_DROPPED_SAMPLES`.
+- Interoperability, ramp form: headless `gr-difi` on the bench host, no missed-packet tags over 10 minutes at 1.92 MS/s; sender length-mismatch count 0.
 - Overlay removal while streaming, three cycles: no oops, ring released, stream restarts after reload.
 - One hour at 1.92 MS/s with `CNT_OVERFLOW_EVENTS` = 0; ring and FIFO high-water marks recorded.
 
-**Not in this release.** Standalone operation: R3 is bench-only. It boots over JTAG and netboot, uses the fixed fallback `ethaddr` (`HIL_BOARD_MAC`) and is watched from LNXPC over the HIL link. SD boot, EEPROM MAC and clean power-off arrive with B2 before R4. Release notes state this.
+**Not in this release.** Standalone operation: R3 is bench-only. It boots over JTAG and netboot, uses the fixed fallback `ethaddr` (`HIL_BOARD_MAC`) and is watched from LNXPC over the HIL link. SD boot with the PL package on the card, EEPROM MAC and clean power-off arrive with B2 before R4. Release notes state this.
 
 **Risk.** The driver is the largest single software item. Check early that `xilinx_dma` reports the transferred length of a short, `TLAST`-terminated S2MM descriptor in its completion residue, because the sender's length check relies on it _(verify)_.
 
@@ -291,9 +295,9 @@ flowchart LR
 
 - Rate steering: about once per second, snapshot `TB_NOW` bracketed by the system clock, and adjust `TB_INC_PS_FRAC` through `LOAD_INC` with a PI loop.
 - Calibrated-time lock with the specified hysteresis. Each change is committed through `CTX_STATE_EVENT`, using R5's runtime commit. A re-seed drops lock and updates `CTX_TS_CAL_TIME`.
-- chrony in the image: the runner as the server on the bench, configurable for LNXPC or internet servers when standalone.
+- chrony in the image: the bench host as the server on the bench, configurable for LNXPC or internet servers when standalone.
 
-**Exit criteria.** `test_difi_timebase` as specified (one hour within a few milliseconds of the runner's NTP clock; lock asserts after convergence). A forced re-seed drops lock, announced by a context packet with the change indicator set.
+**Exit criteria.** `test_difi_timebase` as specified (one hour within a few milliseconds of the bench host's NTP clock; lock asserts after convergence). A forced re-seed drops lock, announced by a context packet with the change indicator set.
 
 **Decide.** How the driver learns chrony's synchronization state: the kernel's `STA_UNSYNC` flag, if chrony maintains it on this image, or a small userspace helper that reports it through an `ioctl` _(verify)_.
 
@@ -301,7 +305,7 @@ flowchart LR
 
 **Scope.**
 
-- Captures pass `certify_source.py --difi-version 1.2.1` at the pinned commit, as a CI step on the HIL captures.
+- Captures pass `certify_source.py --difi-version 1.2.1` at the pinned commit, as a step of the HIL suite on the board's captures.
 - 24 h soak at 1.92 MS/s: no overflow events, no missed-packet tags, lock held.
 - PL FIFO sized from the measured `FIFO_HIGH_WATER`, BRAM reclaimed.
 - SD-card boot of the release WIC verified by hand (automated only once an SD mux exists).
@@ -326,6 +330,7 @@ What each build does before a behaviour is fully implemented. Release notes quot
 | `CTX_STATE_EVENT` bit 19 (calibrated-time lock) | R6 | Driver writes `0xA0000000`: not locked, which is true while nothing steers the timebase |
 | Rate steering | R6 | Timebase free-runs at the oscillator's error (about 90 ms per hour at 25 ppm) |
 | Continuous ring, kernel driver, UDP sender | R3 | R1–R2: single-shot captures through UIO |
+| PL package in the SD image (WIC) | B2 | `make hil` stages it onto the NFS root; the release directory carries it next to the image |
 
 | Release | Register map `VERSION` |
 |---|---|
@@ -346,8 +351,8 @@ These items do not depend on the DIFI work but gate how releases can be used. Th
 
 | Item | Lands before | Why then | Effort |
 |---|---|---|---|
-| **B1 Unattended recovery.** INIT strap change (R212/R213; board modification, verify against the schematic first) and a smart plug in the labgrid environment. Verify whether FT2232H-driven `PS_POR_N` / `PS_SRST_N` reset is populated. | R1 | R1 adds the first custom AXI slave and possibly a MIO34 change. Either can leave the board hung or powered off, and CI must recover without a press of SW7. | 8–14 h |
-| **B2 Standalone board.** PMUFW flags for MIO34 and the SD and QSPI boot paths (follow-ups section 6, items 2–4); clean power-button shutdown with `test_shutdown`; MAC address from the EEPROM after confirming AT24MAC402 versus 602. | R4 | R3 is bench-only (LNXPC is the runner host, so the stream is watched over the HIL link). R4, with tones on screen, is the first release worth running away from the bench, where it needs SD boot, a stable MAC and a clean power-off. B2 must land before R7. | 20–35 h |
+| **B1 Unattended recovery.** INIT strap change (R212/R213; board modification, verify against the schematic first) and a smart plug that `make hil` can switch. Verify whether FT2232H-driven `PS_POR_N` / `PS_SRST_N` reset is populated. | R3 | R3 brings the first hour-long unattended runs, followed by R6's hour and R7's 24 h soak, and those must recover without a press of SW7. Until then HIL runs happen at the bench, where the board hangs or power-offs that R1's first custom AXI slave and possible MIO34 change can cause are recovered by hand. | 8–14 h |
+| **B2 Standalone board.** PMUFW flags for MIO34 and the SD and QSPI boot paths (follow-ups section 6, items 2–4); clean power-button shutdown with `test_shutdown`; MAC address from the EEPROM after confirming AT24MAC402 versus 602; the default PL package and `pl-default.dtbo` in the SD image's rootfs, copied in when the artifacts are collected, the way BOOT.BIN goes into the ESP, so the PL stays out of the Yocto build _(verify that `wic cp` writes the image's ext4 partition; otherwise a recipe in `meta-zub1cg-app`)_. | R4 | R3 is bench-only (LNXPC is the bench host, so the stream is watched over the HIL link). R4, with tones on screen, is the first release worth running away from the bench, where it needs SD boot with the PL package on the card, a stable MAC and a clean power-off. B2 must land before R7. | 22–39 h |
 | User LEDs (a "streaming" LED is a cheap status indicator), USB hub | Any time | Not needed by the baseline | Not estimated |
 
 B2 changes BOOT.BIN (PMUFW) but not the PS configuration, so it does not break the freeze.
@@ -360,8 +365,8 @@ M1, the DDC with its bit-true model, and the cocotb benches for R5 need no hardw
 
 ## Release process
 
-- **Tagging.** Tags `v0.N.0` per release; `v0.N.x` for fixes. A tag pipeline runs all three stages plus the SDK, and a tag is only published if HIL passes.
-- **Artifacts.** As collected in R0, kept for tags under `/srv/ci-artifacts/<tag>/`; small artifacts (XSA, PL package, reports) in GitLab without expiry.
+- **Tagging.** Tags `v0.N.0` per release; `v0.N.x` for fixes. Tag the commit locally, run `make release` from a clean checkout, and push the tag only if it passes. After a failure, delete the local tag and tag the fix.
+- **Artifacts.** As collected in R0, under `/srv/releases/<tag>/` on LNXPC. This is the only copy, so the directory belongs in the host's backups.
 - **Release notes.** Implemented architecture sections, the [interim behaviour](#interim-behaviour) rows in effect, register map `VERSION`, known issues and the HIL report.
 - **A/B comparison.** Because no release after R1 changes the PS configuration, an older release's PL package and driver can be loaded on a running board with the live PL iteration procedure (follow-ups section 7), which helps when bisecting a regression.
 
@@ -379,13 +384,14 @@ The effort ranges cover ordinary trouble. Each item below can add weeks on its o
 | CIC timing closure at 122.88 MHz; BRAM budget | R4 | Early out-of-context synthesis of the DDC during build waits |
 | Commit alignment to s_k | R5 | Isolated in its own release, simulation first |
 | MIO34 behaviour on the SD and QSPI boot paths | B2 | JTAG bench unaffected; SD boot not required until R4 |
-| Bench hangs or self power-off | B1 | Scheduled before the first custom AXI slave |
+| Bench hangs or self power-off | R1–R3 | Recovered by hand at the bench until B1, which lands before R3's first hour-long unattended run |
 
 ---
 
 ## Deferred
 
-- **Vivado container** (README open item). CI works with Vivado on the runner host; containerize when the runner host changes or at the next tool bump.
+- **CI pipeline and labgrid** (GitLab CI with a self-hosted runner and a labgrid-managed bench, as sketched in the README). Every step is already a `make` target, `make release` is the sequence a pipeline would run, and `make hil` is the part labgrid would take over, so both can be added later as thin wrappers.
+- **Vivado container** (README open item). Builds use Vivado installed on LNXPC; containerize when the build host changes or at the next tool bump.
 - **SD mux** for automated SD-boot tests, and **OpenOCD** in place of xsdb.
 - **Future features** from the architecture (direct-sampling ADC, PPS alignment, GPS timestamps). Each can be a v1.x release of its own, because the map already reserves their allocations. None needs a PS change, provided the PPS input is a PL pin _(verify pinout)_.
 
@@ -398,4 +404,7 @@ Closed on 30 September 2026.
 - [x] **Pace:** 10 h/week, as assumed in [Planning assumptions](#planning-assumptions).
 - [x] **R3 before R4:** kept. The kernel ring is the riskier integration, and the DDC and its model progress in simulation during R3's build waits. Swapping would show tones about two months sooner, but only as capture and replay, which R2 already demos with the ramp.
 - [x] **R3 requires B2:** no. R3 ships bench-only, and B2 moves to after R3 and before R4. B2 changes BOOT.BIN (PMUFW) but not the PS configuration, so the freeze holds. Total effort is unchanged; only the order differs.
-- [x] **Runner host:** LNXPC. No manual move to the home LAN is needed to watch the stream.
+- [x] **Build and bench host:** LNXPC. No manual move to the home LAN is needed to watch the stream.
+- [x] **CI and labgrid:** deferred (see [Deferred](#deferred)). Releases are built and tested with `make release` on LNXPC; `make hil` drives the bench with a small pytest fixture.
+- [x] **PL package in the rootfs (R0 re-scope):** deferred to B2. Until standalone boot is needed, `make hil` stages the PL package onto the NFS root and the image carries only the boot-time loader, so a PL-only change needs no Yocto build. B2 adds the package to the SD image. About 2–4 h move from R0 to B2; the R0 figure also absorbs the gaps found while scoping it (fragment merging, login expiry, persistent Yocto caches, stored XSA).
+- [x] **B1 before R3:** moved from before R1. Its purpose is unattended recovery, which first matters for R3's hour-long runs; until then the bench is attended.
