@@ -7,10 +7,12 @@
 #   --check    only run the checks (after a reboot, or when a boot misbehaves)
 #
 # Env: HIL_NIC   wired interface cabled to the board (default: enp2s0)
-#      plus everything in hil.env (HIL_HOST_IP, HIL_BOARD_IP, HIL_NETMASK, HIL_SRV)
+#      plus everything in hil.env (HIL_HOST_IP, HIL_BOARD_IP, HIL_NETMASK, HIL_SRV,
+#      HIL_CONSOLE, HIL_SSH_USER, HIL_SSH_KEY)
 #
 # Written for Ubuntu 22.04 with NetworkManager. Not covered: installing Vivado/Vitis
 # (its JTAG cable drivers are only checked), and setting SW2 on the board to JTAG.
+# Re-run it after changing hil-rootfs: stage-netboot.sh refuses a stale installed copy.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -18,6 +20,8 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/hil.env"
 : "${HIL_NIC:=enp2s0}"
 user=${USER:-$(id -un)}
+helper=/usr/local/sbin/hil-rootfs
+sudo_rule=/etc/sudoers.d/zub1cg-hil
 
 die()  { echo "setup-host: ERROR: $*" >&2; exit 1; }
 say()  { echo "setup-host: $*"; }
@@ -43,7 +47,7 @@ setup() {
   [ "$HIL_NETMASK" = 255.255.255.0 ] || die "this script assumes a /24 (HIL_NETMASK=255.255.255.0)"
   sudo -v   # ask for the sudo password once, up front
 
-  step "1/7 Static address $HIL_HOST_IP/24 on $HIL_NIC (NetworkManager profile 'hil')"
+  step "1/10 Static address $HIL_HOST_IP/24 on $HIL_NIC (NetworkManager profile 'hil')"
   # Point-to-point link to the board: static address, no gateway, no IPv6, so it never
   # becomes the default route and never touches the home network. Autoconnects when the
   # cable is plugged in.
@@ -57,7 +61,7 @@ setup() {
   fi
   sudo nmcli con up hil >/dev/null 2>&1 || say "profile will activate once the link comes up (cable + board powered)"
 
-  step "2/7 dnsmasq config: TFTP only, on $HIL_NIC only"
+  step "2/10 dnsmasq config: TFTP only, on $HIL_NIC only"
   # Written before the package is installed, so its first start does not try to serve
   # DNS on port 53 and fail against systemd-resolved (port=0 turns DNS off).
   # bind-dynamic keeps dnsmasq working while the NIC has no address (board off, cable out).
@@ -71,17 +75,28 @@ enable-tftp
 tftp-root=$HIL_SRV
 EOF
 
-  step "3/7 Packages"
+  step "3/10 Packages"
   # dnsmasq + nfs-kernel-server: the TFTP and NFS servers the board boots from.
   # u-boot-tools (mkimage) builds boot.scr, device-tree-compiler (fdtget) checks the DTB,
-  # picocom is the serial console for J16.
-  sudo apt-get install -y dnsmasq nfs-kernel-server u-boot-tools device-tree-compiler picocom
+  # picocom is the serial console for J16, openssh-client logs in to the board.
+  sudo apt-get install -y dnsmasq nfs-kernel-server u-boot-tools device-tree-compiler picocom \
+    openssh-client
 
-  step "4/7 Served directory $HIL_SRV"
-  # Owned by you, so staging a build only needs sudo for the rootfs extraction.
+  step "4/10 Served directory $HIL_SRV"
+  # Owned by you, so staging a build only needs root for the rootfs (through hil-rootfs).
   sudo install -d -o "$user" -g "$(id -gn)" "$HIL_SRV"
 
-  step "5/7 NFS export to the board only"
+  step "5/10 $HIL_SRV mounted nosuid,nodev (bind mount onto itself)"
+  # hil-rootfs extracts rootfs tarballs as root without a password. Set-uid files in a
+  # staged rootfs must work on the board (its sudo is one) but never on this host.
+  # The NFS client mounts with its own options, so the board is unaffected.
+  if ! findmnt --fstab -n "$HIL_SRV" >/dev/null; then
+    echo "$HIL_SRV $HIL_SRV none bind,nosuid,nodev 0 0" | sudo tee -a /etc/fstab >/dev/null
+    sudo systemctl daemon-reload
+  fi
+  findmnt -n "$HIL_SRV" >/dev/null || sudo mount "$HIL_SRV"
+
+  step "6/10 NFS export to the board only"
   # no_root_squash: the rootfs is owned by root. Limited to the board's address.
   # /etc/exports.d does not exist on a fresh Ubuntu 22.04.
   sudo mkdir -p /etc/exports.d
@@ -89,7 +104,7 @@ EOF
     | sudo tee /etc/exports.d/hil.exports >/dev/null
   sudo exportfs -ra
 
-  step "6/7 Enable and (re)start the services"
+  step "7/10 Enable and (re)start the services"
   sudo systemctl enable dnsmasq >/dev/null 2>&1 || true
   sudo systemctl enable --now nfs-server
   sudo systemctl restart dnsmasq || {
@@ -97,9 +112,30 @@ EOF
     die "dnsmasq failed to start (see the log above)"
   }
 
-  step "7/7 Serial console access"
-  # /dev/ttyUSB1 (J16 UART) belongs to the dialout group. Takes effect at the next login.
+  step "8/10 Serial console access"
+  # The J16 UART belongs to the dialout group. Takes effect at the next login.
   sudo usermod -aG dialout "$user"
+
+  step "9/10 Test login key $HIL_SSH_KEY"
+  # Only the public half goes into staged rootfs trees; the private key stays here.
+  install -d -m 0700 "$(dirname "$HIL_SSH_KEY")"
+  if [ -f "$HIL_SSH_KEY" ]; then
+    say "key exists, kept"
+  else
+    ssh-keygen -q -t ed25519 -N '' -C "zub1cg-hil@$(hostname)" -f "$HIL_SSH_KEY"
+  fi
+
+  step "10/10 Staging helper $helper and its sudo rule"
+  # Root-owned copy with the served directory filled in; the rule allows this one path
+  # without a password, so make hil-stage (and make hil) run unattended.
+  local tmp
+  tmp=$(mktemp)
+  sed "s|@HIL_SRV@|$HIL_SRV|" "$here/hil-rootfs" > "$tmp"
+  sudo install -o root -g root -m 0755 "$tmp" "$helper"
+  echo "$user ALL=(root) NOPASSWD: $helper" > "$tmp"
+  sudo visudo -cqf "$tmp" || { rm -f "$tmp"; die "generated sudo rule fails visudo -c"; }
+  sudo install -o root -g root -m 0440 "$tmp" "$sudo_rule"
+  rm -f "$tmp"
 }
 
 # ---- checks (never fatal, they only report) ----------------------------------------------
@@ -137,8 +173,20 @@ verify() {
     ok "no active ufw"
   fi
 
+  # Unattended staging.
+  out=$(findmnt -n -o OPTIONS "$HIL_SRV" 2>/dev/null || true)
+  if [[ ,$out, == *,nosuid,* ]]; then ok "$HIL_SRV mounted nosuid"
+  else warn "$HIL_SRV is not a nosuid mount (run this script without --check)"; fi
+  if [ -f "$HIL_SSH_KEY" ] && [ -f "$HIL_SSH_KEY.pub" ]; then ok "test login key $HIL_SSH_KEY"
+  else warn "no test login key at $HIL_SSH_KEY (run this script without --check)"; fi
+  if sed "s|@HIL_SRV@|$HIL_SRV|" "$here/hil-rootfs" | cmp -s - "$helper"; then ok "$helper installed and current"
+  else warn "$helper missing or older than tests/hil/scripts/hil-rootfs (run this script without --check)"; fi
+  # -k: ignore cached credentials, so this tests the NOPASSWD rule itself.
+  if sudo -n -k "$helper" check >/dev/null 2>&1; then ok "sudo allows $helper without a password"
+  else warn "no password-free sudo rule for $helper (run this script without --check)"; fi
+
   # Host tools. xsdb/bootgen only exist after sourcing Vivado's settings64.sh.
-  for t in mkimage fdtget picocom; do
+  for t in mkimage fdtget picocom ssh; do
     command -v "$t" >/dev/null && ok "$t found" || warn "$t not found (setup step 3)"
   done
   for t in xsdb bootgen; do
@@ -152,15 +200,15 @@ verify() {
   else
     warn "Xilinx udev rules missing: run install_drivers (as root) from <Vivado>/data/xicom/cable_drivers/lin64/install_script/, then replug J16"
   fi
-  if [ -e /dev/ttyUSB1 ]; then ok "console port /dev/ttyUSB1 present"
-  else warn "no /dev/ttyUSB1 (J16 connected? other USB serial adapters shift the numbering)"; fi
+  if [ -e "$HIL_CONSOLE" ]; then ok "console $HIL_CONSOLE present"
+  else warn "no $HIL_CONSOLE (J16 connected? see ls -l /dev/serial/by-id/ and HIL_CONSOLE in hil.env)"; fi
 
   groups_db=" $(id -nG "$user") "
   groups_now=" $(id -nG) "
   if [[ $groups_db != *" dialout "* ]]; then
     warn "$user is not in the dialout group (run this script without --check)"
   elif [[ $groups_now != *" dialout "* ]]; then
-    warn "dialout is set but this login predates it: log out and back in (or: sg dialout -c 'picocom -b 115200 /dev/ttyUSB1')"
+    warn "dialout is set but this login predates it: log out and back in (or: sg dialout -c 'picocom -b 115200 $HIL_CONSOLE')"
   else
     ok "$user can use the serial console"
   fi

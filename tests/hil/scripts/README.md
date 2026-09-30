@@ -106,7 +106,7 @@ f=$(basename "$(ls -t /lib/firmware/*.dtbo | head -1)")
 echo $f
 sudo mkdir /sys/kernel/config/device-tree/overlays/pl
 echo "$f" | sudo tee /sys/kernel/config/device-tree/overlays/pl/path
-cat /sys/kernel/config/device-tree/overlays/pl/statuss
+cat /sys/kernel/config/device-tree/overlays/pl/status
 ```
 
 ## Configuration

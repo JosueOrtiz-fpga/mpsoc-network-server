@@ -5,10 +5,14 @@
 #   out/sw/rootfs.tar.gz       -> $HIL_SRV/<id>/rootfs/   (NFS root, extracted as root)
 #   tests/hil/scripts/netboot.cmd         -> out/hil/boot.scr        (loaded over JTAG by jtag-boot.tcl)
 #   --with-pl: out/hw/pl/*.bit.bin + *.dtbo -> rootfs/lib/firmware/
+#   test login: $HIL_SSH_KEY.pub for $HIL_SSH_USER, no forced password change, sudo
+#               without a password (in the staged rootfs only, never in the image)
 #
 # <id> is the build's `git describe` from out/sw/manifest.txt, so several builds
 # can sit side by side. The rootfs is re-extracted on every run, so nothing from
-# an earlier boot leaks into the next one. Needs sudo for the rootfs only.
+# an earlier boot leaks into the next one. Everything that needs root goes through
+# hil-rootfs, which setup-host.sh installs with a password-free sudo rule, so this
+# script runs unattended.
 #
 # Usage: tests/hil/scripts/stage-netboot.sh [--with-pl] [out-sw-dir]
 set -euo pipefail
@@ -20,6 +24,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 # shellcheck source=hil.env
 . "$here/hil.env"
+helper=/usr/local/sbin/hil-rootfs
 
 with_pl=0
 if [ "${1:-}" = --with-pl ]; then with_pl=1; shift; fi
@@ -35,6 +40,15 @@ done
 command -v mkimage >/dev/null || die "mkimage not found (Debian/Ubuntu: apt install u-boot-tools)"
 [ -d "$HIL_SRV" ] && [ -w "$HIL_SRV" ] \
   || die "$HIL_SRV missing or not writable (one-time host setup in tests/hil/scripts/README.md)"
+[ -f "$HIL_SSH_KEY.pub" ] || die "no $HIL_SSH_KEY.pub (run tests/hil/scripts/setup-host.sh)"
+
+# The installed helper must be this repo's version, and sudo must allow it without a
+# password (-k ignores cached credentials, so a recent sudo elsewhere cannot hide a
+# missing rule).
+sed "s|@HIL_SRV@|$HIL_SRV|" "$here/hil-rootfs" | cmp -s - "$helper" \
+  || die "$helper is missing or differs from tests/hil/scripts/hil-rootfs (run tests/hil/scripts/setup-host.sh)"
+sudo -n -k "$helper" check >/dev/null \
+  || die "sudo does not allow $helper without a password (run tests/hil/scripts/setup-host.sh)"
 
 # Only the files used here; hashing the multi-GB WIC would just cost time.
 ( cd "$sw" && grep -E ' \./(Image|system\.dtb|rootfs\.tar\.gz|jtag/[^/]+)$' SHA256SUMS \
@@ -60,20 +74,20 @@ mkdir -p "$dest"
 install -m 0644 "$sw/Image" "$sw/system.dtb" "$dest/"
 
 # ---- NFS: rootfs --------------------------------------------------------------------
-say "extracting rootfs (sudo)"
-sudo rm -rf --one-file-system "$dest/rootfs"
-sudo mkdir "$dest/rootfs"
-sudo tar --numeric-owner -xpzf "$sw/rootfs.tar.gz" -C "$dest/rootfs"
+say "extracting rootfs"
+sudo -n "$helper" extract "$id" "$sw/rootfs.tar.gz"
 
 if [ "$with_pl" = 1 ]; then
   shopt -s nullglob
   pl=("$root"/out/hw/pl/*.bit.bin "$root"/out/hw/pl/*.dtbo)
   shopt -u nullglob
   [ ${#pl[@]} -gt 0 ] || die "--with-pl: nothing in out/hw/pl (run 'make hw-plpkg')"
-  sudo install -d "$dest/rootfs/lib/firmware"
-  sudo install -m 0644 "${pl[@]}" "$dest/rootfs/lib/firmware/"
+  sudo -n "$helper" firmware "$id" "${pl[@]}"
   say "PL package: ${pl[*]##*/}"
 fi
+
+say "test login: $HIL_SSH_USER with $HIL_SSH_KEY"
+sudo -n "$helper" seed-login "$id" "$HIL_SSH_USER" "$HIL_SSH_KEY.pub"
 
 # ---- boot.scr -------------------------------------------------------------------------
 mkdir -p "$out_hil"
@@ -98,6 +112,7 @@ ip -brief addr 2>/dev/null | grep -q "[[:space:]]$HIL_HOST_IP/" \
 
 cat <<EOF
 hil-stage: ready ($dest)
-  1. Open the J16 console at 115200 8N1 (usually /dev/ttyUSB1), e.g.: picocom -b 115200 /dev/ttyUSB1
+  1. Open the J16 console at 115200 8N1: picocom -b 115200 $HIL_CONSOLE
   2. make jtag-boot
+  3. Once booted: ssh -i $HIL_SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $HIL_SSH_USER@$HIL_BOARD_IP
 EOF

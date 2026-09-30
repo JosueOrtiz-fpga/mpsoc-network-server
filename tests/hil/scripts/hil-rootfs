@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# tests/hil/scripts/hil-rootfs - the root-only part of HIL staging (stage-netboot.sh).
+#
+# setup-host.sh installs a copy as /usr/local/sbin/hil-rootfs (root-owned, with the
+# served directory filled in) and allows it through sudo without a password
+# (/etc/sudoers.d/zub1cg-hil), so `make hil` can stage a build unattended. Edits here
+# take effect only once setup-host.sh installs them; stage-netboot.sh refuses to run
+# while the installed copy differs from this file.
+#
+# Every subcommand writes only inside @HIL_SRV@/<id>/rootfs and reads only regular
+# files owned by the user who called sudo. That narrows what the sudo rule allows,
+# but it is not a hard boundary against code already running as that user.
+# setup-host.sh mounts the served directory nosuid, so set-uid files in a staged
+# rootfs work on the board but do nothing on the host.
+#
+# Usage (through sudo):
+#   hil-rootfs check                                  exits 0: tests the sudo rule
+#   hil-rootfs extract    <id> <rootfs.tar.gz>        fresh rootfs from the tarball
+#   hil-rootfs firmware   <id> <file>...              .bit.bin / .dtbo -> /lib/firmware
+#   hil-rootfs seed-login <id> <user> <public-key>    test login, see cmd_seed_login
+set -euo pipefail
+
+srv="@HIL_SRV@"
+
+die() { echo "hil-rootfs: ERROR: $*" >&2; exit 1; }
+
+[ "$(id -u)" -eq 0 ] || die "run through sudo"
+[ -n "${SUDO_UID:-}" ] || die "run through sudo (SUDO_UID is not set)"
+case "$srv" in /?*) ;; *) die "not installed by setup-host.sh (served directory unset)" ;; esac
+
+# $srv/<id>: a real directory, as stage-netboot.sh creates it.
+stage_dir() {
+  local id=$1 d
+  [[ $id =~ ^[A-Za-z0-9._-]+$ && $id != . && $id != .. ]] || die "bad build id '$id'"
+  d="$srv/$id"
+  [ -d "$d" ] && [ ! -L "$d" ] || die "$d is not a directory"
+  [ "$(realpath "$d")" = "$d" ] || die "$d resolves outside $srv"
+  echo "$d"
+}
+
+rootfs_of() {
+  [ -d "$1/rootfs" ] && [ ! -L "$1/rootfs" ] || die "no staged rootfs in $1 (extract first)"
+  echo "$1/rootfs"
+}
+
+# Resolve a path in the staged rootfs; absolute symlinks in the rootfs would
+# otherwise point at the host's own /etc, /lib or /home.
+inside() {
+  local p
+  p=$(realpath -m "$1")
+  case "$p" in "$2"/*) echo "$p" ;; *) die "$1 resolves outside the staged rootfs" ;; esac
+}
+
+# An input file: regular, not a symlink, owned by the calling user.
+user_file() {
+  [ -f "$1" ] && [ ! -L "$1" ] || die "$1 is not a regular file"
+  [ "$(stat -c %u "$1")" = "$SUDO_UID" ] || die "$1 is not owned by the calling user"
+}
+
+cmd_extract() {
+  [ $# -eq 2 ] || die "usage: hil-rootfs extract <id> <rootfs.tar.gz>"
+  local d
+  d=$(stage_dir "$1")
+  user_file "$2"
+  rm -rf --one-file-system "$d/rootfs"
+  mkdir "$d/rootfs"
+  tar --numeric-owner -xpzf "$2" -C "$d/rootfs"
+}
+
+cmd_firmware() {
+  [ $# -ge 2 ] || die "usage: hil-rootfs firmware <id> <file>..."
+  local d r fw f
+  d=$(stage_dir "$1"); shift
+  r=$(rootfs_of "$d")
+  for f in "$@"; do
+    case "$f" in *.bit.bin|*.dtbo) ;; *) die "$f: only .bit.bin and .dtbo files go to /lib/firmware" ;; esac
+    user_file "$f"
+  done
+  fw=$(inside "$r/lib/firmware" "$r")
+  install -d -m 0755 "$fw"
+  install -m 0644 -o root -g root "$@" "$fw/"
+}
+
+# Test login for <user> in the staged rootfs only, never in the image:
+#   - <public-key> as its only authorized key
+#   - no forced password change (a last-change day of 0 in /etc/shadow forces one,
+#     and sshd with UsePAM enforces it even for key logins)
+#   - sudo without a password; the drop-in sorts last, because sudo applies the last
+#     matching rule
+cmd_seed_login() {
+  [ $# -eq 3 ] || die "usage: hil-rootfs seed-login <id> <user> <public-key>"
+  local d r user=$2 key=$3 ent uid gid home hd sshd shadow sudoers tmp
+  d=$(stage_dir "$1")
+  r=$(rootfs_of "$d")
+  [[ $user =~ ^[a-z_][a-z0-9_-]*$ ]] || die "bad user name '$user'"
+  user_file "$key"
+  [ "$(wc -l < "$key")" -le 1 ] \
+    && grep -Eq '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-[a-z0-9-]+) [A-Za-z0-9+/=]+( .*)?$' "$key" \
+    || die "$key is not a single OpenSSH public key"
+
+  ent=$(grep -E "^$user:" "$(inside "$r/etc/passwd" "$r")") || die "no user '$user' in the staged rootfs"
+  IFS=: read -r _ _ uid gid _ home _ <<<"$ent"
+  [[ $uid =~ ^[0-9]+$ && $gid =~ ^[0-9]+$ ]] || die "bad passwd entry for '$user'"
+  [[ $home == /* && $home != *..* ]] || die "bad home directory '$home' for '$user'"
+
+  # Authorized key. sshd's StrictModes wants the owner's uid on all three and no
+  # group or world write access.
+  hd=$(inside "$r$home" "$r")
+  [ -d "$hd" ] || install -d -m 0755 -o "$uid" -g "$gid" "$hd"
+  sshd=$(inside "$hd/.ssh" "$r")
+  install -d -m 0700 -o "$uid" -g "$gid" "$sshd"
+  rm -f "$sshd/authorized_keys"
+  install -m 0600 -o "$uid" -g "$gid" "$key" "$sshd/authorized_keys"
+
+  # Password last changed today instead of day 0.
+  shadow=$(inside "$r/etc/shadow" "$r")
+  tmp=$(mktemp)
+  if ! awk -F: -v OFS=: -v u="$user" -v day="$(( $(date +%s) / 86400 ))" \
+         '$1 == u { $3 = day; n++ } 1; END { exit n != 1 }' "$shadow" > "$tmp"; then
+    rm -f "$tmp"; die "no single /etc/shadow entry for '$user'"
+  fi
+  cat "$tmp" > "$shadow"      # keeps the file's owner and mode
+  rm -f "$tmp"
+
+  # Password-free sudo.
+  sudoers=$(inside "$r/etc/sudoers.d" "$r")
+  [ -d "$sudoers" ] || die "no /etc/sudoers.d in the staged rootfs"
+  tmp=$(mktemp)
+  printf '# Staged by hil-rootfs for HIL automation; not part of the image.\n%s ALL=(ALL) NOPASSWD: ALL\n' \
+    "$user" > "$tmp"
+  visudo -cqf "$tmp" || { rm -f "$tmp"; die "sudoers drop-in does not pass visudo -c"; }
+  rm -f "$sudoers/zz-hil-automation"
+  install -m 0440 -o root -g root "$tmp" "$sudoers/zz-hil-automation"
+  rm -f "$tmp"
+}
+
+case "${1:-}" in
+  check)      echo "hil-rootfs: ok" ;;
+  extract)    shift; cmd_extract "$@" ;;
+  firmware)   shift; cmd_firmware "$@" ;;
+  seed-login) shift; cmd_seed_login "$@" ;;
+  *)          die "usage: hil-rootfs {check|extract|firmware|seed-login} ..." ;;
+esac
