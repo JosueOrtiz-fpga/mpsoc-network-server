@@ -7,7 +7,7 @@ HW_MAKE := $(MAKE) --no-print-directory -C hw
 
 .PHONY: help \
         hw-lint hw-sim hw-project hw-bit hw-xsa hw-plpkg hw-wrapper hw-clean \
-        platform platform-check sw-image sw-sdk hil clean
+        platform platform-check sw-image sw-sdk sw-lock sw-shell hil hil-stage jtag-boot clean
 
 help:
 	@echo "Hardware (implemented):"
@@ -20,8 +20,13 @@ help:
 	@echo "  make hw-wrapper   Regenerate hw/rtl/<bd>_wrapper.v after BD port changes"
 	@echo "  make hw-clean     Remove build/hw and out/hw"
 	@echo ""
-	@echo "Planned (not implemented yet):"
-	@echo "  make platform | platform-check | sw-image | sw-sdk | hil"
+	@echo "Platform and software (delegated to sw/Makefile):"
+	@echo "  make platform | platform-check | sw-image | sw-sdk | sw-lock | sw-shell"
+	@echo ""
+	@echo "HIL bench (tests/hil):"
+	@echo "  make hil-stage    Stage out/sw for netboot (WITH_PL=1 adds the PL package)"
+	@echo "  make jtag-boot    Boot the staged build over JTAG (console by hand)"
+	@echo "  make hil          Stage with PL, JTAG-boot and run the pytest suite (PYTEST_ARGS=...)"
 
 hw-lint:    ; @$(HW_MAKE) lint
 hw-sim:     ; @$(HW_MAKE) sim
@@ -44,6 +49,7 @@ hw-plpkg:
 # ---- HIL bench: JTAG boot + TFTP/NFS netboot (tests/hil/scripts/) ------------
 HIL_SCRIPTS := tests/hil/scripts
 XSDB ?= xsdb
+export XSDB
 
 hil-stage:
 	$(HIL_SCRIPTS)/stage-netboot.sh $(if $(WITH_PL),--with-pl) out/sw
@@ -51,4 +57,17 @@ hil-stage:
 jtag-boot:
 	@test -f out/hil/boot.scr || { echo "run 'make hil-stage' first"; exit 1; }
 	$(XSDB) $(HIL_SCRIPTS)/jtag-boot.tcl out/sw/jtag out/hil/boot.scr
+
+# Stage the last sw-image with the PL package, boot it over JTAG and run tests/hil.
+# Each run gets out/hil/<build id>/<UTC time>/ (console.log, jtag-boot.log, junit.xml),
+# with out/hil/<build id>/latest pointing at it. Needs Vivado's settings64.sh (xsdb)
+# and no picocom on the console. PYTEST_ARGS passes options through, e.g. -k pl.
+PYTEST ?= python3 -m pytest
+hil: WITH_PL = 1
+hil: hil-stage
+	@. out/hil/stage.env && run=out/hil/$$HIL_ID/$$(date -u +%Y%m%dT%H%M%SZ) \
+	  && mkdir -p $$run && ln -sfn $$(basename $$run) out/hil/$$HIL_ID/latest \
+	  && echo "hil: run directory $$run" \
+	  && HIL_RUN_DIR=$(CURDIR)/$$run $(PYTEST) tests/hil --junitxml=$$run/junit.xml $(PYTEST_ARGS)
+
 clean: hw-clean

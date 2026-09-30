@@ -78,9 +78,10 @@ EOF
   step "3/10 Packages"
   # dnsmasq + nfs-kernel-server: the TFTP and NFS servers the board boots from.
   # u-boot-tools (mkimage) builds boot.scr, device-tree-compiler (fdtget) checks the DTB,
-  # picocom is the serial console for J16, openssh-client logs in to the board.
+  # picocom is the serial console for J16, openssh-client logs in to the board,
+  # python3-pytest runs the suite in tests/hil (make hil).
   sudo apt-get install -y dnsmasq nfs-kernel-server u-boot-tools device-tree-compiler picocom \
-    openssh-client
+    openssh-client python3-pytest
 
   step "4/10 Served directory $HIL_SRV"
   # Owned by you, so staging a build only needs root for the rootfs (through hil-rootfs).
@@ -189,6 +190,8 @@ verify() {
   for t in mkimage fdtget picocom ssh; do
     command -v "$t" >/dev/null && ok "$t found" || warn "$t not found (setup step 3)"
   done
+  if python3 -c 'import pytest' 2>/dev/null; then ok "pytest found"
+  else warn "pytest not found for python3 (setup step 3)"; fi
   for t in xsdb bootgen; do
     command -v "$t" >/dev/null && ok "$t found" || warn "$t not on PATH: source <Vivado install>/settings64.sh in this shell"
   done

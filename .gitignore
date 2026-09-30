@@ -3,3 +3,6 @@ build/
 out/
 temp/
 layers/
+
+# Python bytecode (tests/hil)
+__pycache__/
