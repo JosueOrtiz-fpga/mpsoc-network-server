@@ -140,7 +140,7 @@ Context packets are always 27 words: the same seven-word prologue, carrying the 
 | State and Event word | `0x00000000`: every enable bit clear, so no indicator is asserted. Not supported, by design (see the deviation note under [Standard version](#standard-version)). | VITA 49.2 convention (a clear enable marks its indicator as unused). The field stays present, as CIF0 requires. |
 | I/Q order | I then Q for each sample; for 16-bit, I in bits 31:16 | Spec §4.2; `certify_source.py` |
 
-**TSI is POSIX, not UTC.** DIFI's UTC code counts leap seconds since 1970; POSIX time does not. The timebase is seeded from the Linux clock, which is POSIX time, so labelling it UTC would be wrong by the leap seconds inserted since 1972 (27 so far). The Consortium's generator, all reference captures and `gr-difi`'s sink use POSIX as well. GPS becomes the natural choice if a GPS-disciplined PPS is added; `TSI_SEL` allows that without a rebuild.
+**TSI is POSIX, not UTC.** DIFI's UTC code counts leap seconds since 1970; POSIX time does not. The timebase is seeded from the Linux clock, which is POSIX time, so labelling it UTC would be wrong by the leap seconds inserted since 1972 (27 so far). The Consortium's generator, all reference captures and `gr-difi`'s sink use POSIX as well.
 
 **Reference point 75.** The test source is described as entering at the RF converter analog port, with no analog IF. Consequently IF Reference Frequency is 0, IF Band Offset is 0 (zero-IF output), and RF Reference Frequency is the center of the output band. See [Future features](#direct-sampling-hf-adc) for why this reference point was chosen.
 
@@ -263,7 +263,7 @@ Commit error codes:
 | `0x03` | A locked (**L**) register changed while `ENABLE=1` |
 | `0x04` | `PAYLOAD_FORMAT` is not supported by this build |
 | `0x05` | `SRC_SEL` selects a source this build does not have |
-| `0x06` | `TSI_SEL` is 0 (not allowed in DIFI) |
+| `0x06` | `TSI_SEL` is not 3 (POSIX): 0 is not allowed in DIFI, 1 (UTC) is not supported, 2 is RSVD (growth) |
 | `0x07` | `CTX_REF_POINT_ID` is not 100, 75, 25 or 15 |
 
 A rejected commit leaves the active set unchanged and sets `STICKY.COMMIT_REJECTED`.
@@ -295,7 +295,7 @@ A rejected commit leaves the active set unchanged and sets `STICKY.COMMIT_REJECT
 | `0x114` | `SAMPLES_PER_PKT` | RW S L | 15:0 | `360` | Complex samples per data packet, 18 to the `CAPS` maximum; see [Sizing](#sizing). |
 | `0x118` | `CTX_INTERVAL` | RW S | 23:0 | `0` | Data packets between periodic context packets; 0 = only on start, commit and overflow recovery. The driver sets it for about one context packet per second; DIFI allows at most 20 per second in total. |
 | `0x11C` | `PAYLOAD_FORMAT` | RW S L | 4:0 item bits − 1 | `15` | Sample width. This build accepts only 16-bit. The other format fields (complex Cartesian, signed fixed-point) are fixed by DIFI; the PL builds the context packet's payload format field from them. |
-| `0x120` | `TSI_SEL` | RW S L | 1:0 | `3` | Integer-seconds timestamp type: 1 = UTC, 2 = GPS, 3 = POSIX. 0 is rejected. Must match how the timebase was seeded; see [Field values](#field-values). |
+| `0x120` | `TSI_SEL` | RW S L | 1:0 | `3` | Integer-seconds timestamp type: 3 = POSIX; 2 = RSVD (growth); 0 and 1 are rejected with `0x06`. Must match how the timebase was seeded; see [Field values](#field-values). |
 
 ### Signal chain (`0x140`)
 
@@ -336,7 +336,7 @@ The sample rate is supplied by software rather than derived in the PL, which kee
 | Offset | Name | Access | Bits | Reset | Description |
 |---|---|---|---|---|---|
 | `0x200` | `TB_CTRL` | RW | 0 `LOAD_NOW` (SC), 3:1 RSVD (growth) | `0` | `LOAD_NOW` loads the seed immediately. |
-| `0x204` | `TB_SEED_SEC` | RW | 31:0 | `0` | Integer seconds to load, in the `TSI_SEL` epoch (POSIX by default); fractional part resets to 0 on load. |
+| `0x204` | `TB_SEED_SEC` | RW | 31:0 | `0` | Integer seconds to load, in the `TSI_SEL` epoch; fractional part resets to 0 on load. |
 | `0x208` | `TB_INC_PS_INT` | RW | 31:0 | build | Picoseconds per `FS_IN` clock, integer part. |
 | `0x20C` | `TB_INC_PS_FRAC` | RW | 31:0 | build | Fractional part, in units of 2⁻³² ps. |
 | `0x210` | `TB_NOW_SEC` | RO N | 31:0 | `0` | Current integer seconds. |
@@ -379,7 +379,7 @@ To change a locked setting, such as packet size or decimation: disable, reconfig
 
 ## Timebase and timestamps
 
-Timestamps use TSI POSIX by default (`TSI_SEL`) and TSF real-time picoseconds, as Information Class `0x0000` requires.
+Timestamps use TSI POSIX (`TSI_SEL`) and TSF real-time picoseconds, as Information Class `0x0000` requires.
 
 The timebase is a counter in the `FS_IN` clock domain. Each clock it adds `TB_INC_PS` (a Q32.32 value in picoseconds, so non-integer periods accumulate without drift) and rolls fractional seconds over at 10¹² ps.
 
@@ -517,6 +517,19 @@ A PPS input aligns the timebase to the sample clock, beyond the few milliseconds
 | `TB_CTRL` bits 3:1 | `ARM_PPS` (load the seed on the next edge, self-clearing), `PPS_EN`, `PPS_INVERT` |
 | `0x21C` | `TB_PPS_ERR_PS`: signed fractional seconds at the last PPS edge, in picoseconds |
 
+### GPS timestamps
+
+GPS time as the integer-seconds timestamp (TSI GPS). The PL's part is small: the timebase does not depend on the epoch, so `TSI_SEL` only sets the TSI bits in the data and context headers, and the commit check accepts 2. The rest is in the driver, which seeds `TB_SEED_SEC` and `CTX_TS_CAL_TIME` in the GPS epoch: GPS seconds = POSIX seconds − 315,964,800 + the current GPS−UTC offset (18 s).
+
+- **Time source.** GPS timestamps are most useful with a GPS-disciplined PPS (see [PPS timebase alignment](#pps-timebase-alignment)), but they do not require it; the driver can also seed GPS seconds from the Linux clock.
+- **Header values.** Header bits 31:20 become `0x18A` for data packets and `0x49A` for context packets.
+- **Receiver support.** Whether `gr-difi` accepts TSI GPS _(verify)_: it targets DIFI 1.0, and its sink uses POSIX.
+- **UTC** (`TSI_SEL` = 1) is not planned, for the reasons under [Field values](#field-values), and is not claimed.
+
+| Claimed allocation | Use |
+|---|---|
+| `TSI_SEL` = 2 | GPS (rejected with `0x06` until then) |
+
 ---
 
 ## Open decisions and TODO
@@ -529,7 +542,6 @@ A PPS input aligns the timebase to the sample clock, beyond the few milliseconds
 - [x] Jumbo frames: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [x] State and Event indicators: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [ ] Decide the UDP destination model: fixed host IP and port from config, or discovery.
-- [ ] Consider `TSI_SEL` = GPS if a GPS-disciplined PPS is added.
 - [ ] Add Version Flow (Information Class `0x0001`) only if a consumer appears.
 - [ ] Revisit the revision when `certify_source.py` supports 1.3.x.
 - [ ] Decide when to move from UIO + `udmabuf` to the kernel driver.
