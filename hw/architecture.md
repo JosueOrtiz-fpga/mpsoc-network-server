@@ -21,6 +21,7 @@ Architecture of the VITA 49.2 / DIFI I/Q stream from the ZUBoard 1CG to GNU Radi
 - [Design review](#design-review)
 - [Verification plan](#verification-plan)
 - [Proposed code layout](#proposed-code-layout)
+- [Future features](#future-features)
 - [Open decisions and TODO](#open-decisions-and-todo)
 - [References](#references)
 
@@ -28,7 +29,7 @@ Architecture of the VITA 49.2 / DIFI I/Q stream from the ZUBoard 1CG to GNU Radi
 
 ## Goals and scope
 
-The board produces a stream of HF I/Q samples, first from a synthetic test source in the PL and later from a direct-sampling HF ADC, and sends it to a host PC over Ethernet in a form that open-source SDR software can consume without custom code.
+The board produces a stream of HF I/Q samples from a synthetic test source in the PL and sends it to a host PC over Ethernet in a form that open-source SDR software can consume without custom code.
 
 The stream format is **DIFI** (IEEE-ISTO Std 4900-2021, conformance target v1.2.1, see [Standard version](#standard-version)), a published, constrained profile of ANSI/VITA 49.2. DIFI pins down the packet types, prologue fields, timestamp modes and sample format. The reference receiver is GNU Radio with the `gr-difi` out-of-tree module, the only mainstream open-source SDR stack that ingests this format natively.
 
@@ -50,7 +51,7 @@ In scope: the PL signal chain and packetizer, the PS control plane and UDP trans
 
 ## System overview
 
-![ZUBoard DIFI stream: PL packetizer with PS-mastered control plane](img/difi-pl-packetizer.png)
+![ZUBoard DIFI stream: PL packetizer with PS-mastered control plane](zuboard_pl_packetizer_with_ps_control_plane.svg)
 
 Solid arrows carry samples and packets; dashed arrows carry control and status. Purple nodes are the data path, coral nodes the control plane, grey nodes the host.
 
@@ -62,9 +63,9 @@ The split of responsibilities is deliberate. The **PL** owns everything that mus
 
 ### PL
 
-The **test source** generates two independently configurable NCO tones, a deterministic counter ramp for bit-exact testing, or zeros. Later, a mux input selects the ADC instead. It runs at the input sample rate `FS_IN`.
+The **test source** generates real samples at the input sample rate `FS_IN`, quantized to a build-time input width and left-justified in 16 bits: two independently configurable NCO tones, or zeros. A deterministic **counter ramp** for bit-exact packetizer tests is injected after the DDC instead, as complex samples at the output rate, paced by the DDC's output valid strobe, so packet timing and the context sample rate are the same as for the other sources.
 
-The **DDC** mixes the selected input to baseband with a tunable NCO, decimates it with a CIC plus compensating FIR chain, and outputs complex signed 16-bit I/Q. A direct-sampled HF ADC produces real samples, and DIFI requires complex samples, so the DDC is required even for a single tone.
+The **DDC** mixes the selected input to baseband with a tunable NCO, decimates it with a CIC plus compensating FIR chain, and outputs complex signed 16-bit I/Q. The test source's samples are real, and DIFI requires complex samples, so the DDC is needed even for a single tone.
 
 The **DIFI packetizer** accumulates `SAMPLES_PER_PKT` samples, byte-swaps them to big-endian, and prepends the 28-byte DIFI prologue: header, stream ID, class ID, and integer and fractional timestamps. The timestamp is the time the packet's first sample left the signal source (see [Timebase and timestamps](#timebase-and-timestamps)). It also emits context packets according to the [context rules](#context-packet-rules). Both packet types leave through the same AXI4-Stream, so their ordering is preserved end to end.
 
@@ -141,7 +142,7 @@ Context packets are always 27 words: the same seven-word prologue, carrying the 
 
 **TSI is POSIX, not UTC.** DIFI's UTC code counts leap seconds since 1970; POSIX time does not. The timebase is seeded from the Linux clock, which is POSIX time, so labelling it UTC would be wrong by the leap seconds inserted since 1972 (27 so far). The Consortium's generator, all reference captures and `gr-difi`'s sink use POSIX as well. GPS becomes the natural choice if a GPS-disciplined PPS is added; `TSI_SEL` allows that without a rebuild.
 
-**Reference point 75.** The board samples HF directly, with no analog IF, so the RF converter analog port (the ADC input connector) is the reference point. Consequently IF Reference Frequency is 0, IF Band Offset is 0 (zero-IF output), and RF Reference Frequency is the center of the output band. The test-source build uses the same values.
+**Reference point 75.** The test source is described as entering at the RF converter analog port, with no analog IF. Consequently IF Reference Frequency is 0, IF Band Offset is 0 (zero-IF output), and RF Reference Frequency is the center of the output band. See [Future features](#direct-sampling-hf-adc) for why this reference point was chosen.
 
 **Integer hertz.** DIFI requires bandwidth, sample rate and frequencies in whole hertz: the 20 bits right of the radix point must be 0. The output sample rate `FS_IN_HZ` / `DDC_DECIM` must therefore be an integer for every supported decimation, which constrains the choice of `FS_IN`. RF Reference Frequency is the NCO's actual frequency rounded to the nearest hertz; the NCO's step (`FS_IN` / 2³²) is not an integer, so the reported value can differ by up to 0.5 Hz.
 
@@ -216,6 +217,8 @@ One AXI4-Lite slave, 4 KB aperture. The base address is assigned in the block de
 
 64-bit quantities are split `_HI` (bits 63:32) / `_LO` (bits 31:0). They are either shadowed, so the commit makes them atomic, or snapshotted, so readback is coherent.
 
+**RSVD (growth)** marks a bit or field encoding already claimed by a planned feature; [Future features](#future-features) lists each claim. It behaves like any reserved bit or value in this build: read-only bits read as 0, and a commit that writes a growth encoding to a checked field is rejected with the error code given in that field's description. Growth allocations are not reassigned to anything else.
+
 ### Block summary
 
 | Offset | Block |
@@ -236,7 +239,7 @@ One AXI4-Lite slave, 4 KB aperture. The base address is assigned in the block de
 | `0x000` | `ID` | RO | 31:0 | `0x4449_4649` | ASCII `"DIFI"`. The first read after overlay load; HIL `test_pl_regs` checks it. |
 | `0x004` | `VERSION` | RO | 31:24 major, 23:16 minor, 15:0 patch | build | Register map version. The major number changes on any incompatible change; the driver refuses unknown majors. |
 | `0x008` | `BUILD_SHA` | RO | 31:0 | build | First 32 bits of the git SHA used for the bitstream (`GIT_SHA` in `hw/Makefile`); ties the running PL to its `<stem>`. |
-| `0x00C` | `CAPS` | RO | 0 test source, 1 ADC input, 2 PPS input, 3 decimation power-of-two only, 15:8 sample bits, 31:16 max samples per packet | build | Build-time features the driver must check before configuring. Max samples per packet is 361 (1500-byte MTU; see [Sizing](#sizing)). |
+| `0x00C` | `CAPS` | RO | 0 test source, 1 RSVD (growth), 2 PPS input, 3 decimation power-of-two only, 15:8 sample bits, 31:16 max samples per packet | build | Build-time features the driver must check before configuring. Max samples per packet is 361 (1500-byte MTU; see [Sizing](#sizing)). |
 | `0x010` | `DECIM_RANGE` | RO | 15:0 min, 31:16 max | build | Legal `DDC_DECIM` range. |
 | `0x014` | `FS_IN_HZ` | RO | 31:0 | build | Nominal input sample rate in Hz. The driver derives output rate, NCO increments and timebase increment from it. |
 | `0x018` | `SCRATCH` | RW | 31:0 | `0` | Bus sanity check; no effect. |
@@ -298,7 +301,7 @@ A rejected commit leaves the active set unchanged and sets `STICKY.COMMIT_REJECT
 
 | Offset | Name | Access | Bits | Reset | Description |
 |---|---|---|---|---|---|
-| `0x140` | `SRC_SEL` | RW S L | 1:0 | `1` | 0 = ADC input, 1 = test tones, 2 = counter ramp (I = n mod 2¹⁶, Q = ¬I, for bit-exact tests), 3 = zeros. |
+| `0x140` | `SRC_SEL` | RW S L | 1:0 | `1` | 0 = RSVD (growth), rejected with `0x05`; 1 = test tones; 2 = counter ramp, injected after the DDC at the output rate (I = n mod 2¹⁶, Q = ¬I, for bit-exact tests); 3 = zeros. |
 | `0x144` | `TONE0_PHASE_INC` | RW S | 31:0 | `0` | Tone 0 frequency: f = inc × `FS_IN_HZ` / 2³². |
 | `0x148` | `TONE0_AMPL` | RW S | 15:0 Q1.15 | `0x2000` | Tone 0 amplitude (about −12 dBFS). |
 | `0x14C` | `TONE1_PHASE_INC` | RW S | 31:0 | `0` | Tone 1 frequency. |
@@ -321,7 +324,7 @@ These registers are copied verbatim into context packets. The driver computes th
 | `0x1A4` | `CTX_REF_LEVEL` | RW S | 15:0 Q9.7 dBm | Power at the reference point of a sine wave that produces a full-scale sine in the payload. The PL emits the Scaling sub-field (bits 31:16, transmit only) as 0. |
 | `0x1A8` | — | — | — | Reserved. The Gain word is reserved in v1.2.1; the PL always emits 0. |
 | `0x1AC`/`0x1B0` | `CTX_SAMPLE_RATE_HI/_LO` | RW S | Q44.20 Hz, integer | Output sample rate; must equal `FS_IN_HZ` / `DDC_DECIM` exactly. |
-| `0x1B4`/`0x1B8` | `CTX_TS_ADJUST_HI/_LO` | RW S | 64-bit signed, fs | Delay from the reference point to the SID location; negative on receive. Analog front-end plus ADC latency for the ADC build, 0 for the test source. Not the DDC delay (see [Timebase](#timebase-and-timestamps)). |
+| `0x1B4`/`0x1B8` | `CTX_TS_ADJUST_HI/_LO` | RW S | 64-bit signed, fs | Delay from the reference point to the SID location; 0 for the test source. Not the DDC delay (see [Timebase](#timebase-and-timestamps)). |
 | `0x1BC` | `CTX_TS_CAL_TIME` | RW S | 32-bit, s | Last time the timestamp was known correct: integer seconds (in the `TSI_SEL` epoch) of the last seed or PPS alignment. |
 | `0x1C0` | — | — | — | Reserved. State and Event indicators are not supported (see [Standard version](#standard-version)); the PL always emits 0. |
 | `0x1C4` | `CTX_CIF0` | RO | 32-bit | `0x7BB98000`, the field set this build emits. The PL sets bit 31 on context packets that announce a change. |
@@ -339,7 +342,7 @@ The sample rate is supplied by software rather than derived in the PL, which kee
 | `0x210` | `TB_NOW_SEC` | RO N | 31:0 | `0` | Current integer seconds. |
 | `0x214`/`0x218` | `TB_NOW_PS_HI/_LO` | RO N | 63:0 | `0` | Current fractional seconds, in picoseconds. |
 | `0x21C` | `TB_PPS_ERR_PS` | RO | 31:0 signed | `0` | Fractional value observed at the last PPS edge; ideally 0. Drift monitor. |
-| `0x220`/`0x224` | `TS_PIPE_DELAY_PS_HI/_LO` | RW S L | 63:0 | build | Delay from the SID location to the packetizer, in picoseconds (the DDC group delay for the committed decimation). Subtracted from every latched timestamp. |
+| `0x220`/`0x224` | `TS_PIPE_DELAY_PS_HI/_LO` | RW S L | 63:0 | build | Delay from the SID location to the packetizer, in picoseconds (the DDC group delay for the committed decimation). Subtracted from every latched timestamp. 0 when `SRC_SEL` selects the counter ramp, which bypasses the DDC. |
 
 ---
 
@@ -351,7 +354,7 @@ The sample rate is supplied by software rather than derived in the PL, which kee
 2. **Identify.** Read `ID`, `VERSION`, `BUILD_SHA`, `CAPS`, `DECIM_RANGE`, `FS_IN_HZ`, `DIFI_SPEC`. Abort on a wrong `ID` or unknown `VERSION` major. Write and read back `SCRATCH`.
 3. **Quiesce.** Write `CTRL.SOFT_RESET`, confirm `STATUS.RUNNING=0`, write 1s to clear `STICKY`, write `SNAP_CTRL.CLEAR_COUNTERS`.
 4. **Seed the timebase.** Write `TB_INC_PS_INT/FRAC` (10¹² / `FS_IN_HZ`) and `TB_SEED_SEC` (POSIX seconds from the Linux clock). Then either write `TB_CTRL.LOAD_NOW` just after a second boundary of the system clock, or set `PPS_EN` and `ARM_PPS` and wait for `STATUS.TIMEBASE_VALID`.
-5. **Configure.** Write all stream, signal chain and context registers (shadow set). Derive `CTX_SAMPLE_RATE`, `CTX_BANDWIDTH` and `CTX_RF_REF_FREQ` from the same inputs used for `DDC_DECIM` and `DDC_PHASE_INC`, and refuse a decimation whose output rate is not a whole number of hertz. Write `TS_PIPE_DELAY_PS` for the decimation, and `CTX_TS_CAL_TIME` from the seed in step 4.
+5. **Configure.** Write all stream, signal chain and context registers (shadow set). Derive `CTX_SAMPLE_RATE`, `CTX_BANDWIDTH` and `CTX_RF_REF_FREQ` from the same inputs used for `DDC_DECIM` and `DDC_PHASE_INC`, and refuse a decimation whose output rate is not a whole number of hertz. Write `TS_PIPE_DELAY_PS` for the decimation (0 for the counter ramp), and `CTX_TS_CAL_TIME` from the seed in step 4.
 6. **Commit.** Write `COMMIT.COMMIT`, wait for `COMMIT_STATUS.PENDING=0`, check `ERROR=0`. While disabled, the commit applies immediately.
 7. **Arm the DMA ring.** Queue all slots to the S2MM channel before the source can produce data.
 8. **Enable interrupts.** Set `IRQ_ENABLE` for at least `FIFO_OVERFLOW`, `COMMIT_REJECTED`, `COMMIT_DONE` and `PPS_LOST`.
@@ -380,9 +383,9 @@ Timestamps use TSI POSIX by default (`TSI_SEL`) and TSF real-time picoseconds, a
 
 The timebase is a counter in the `FS_IN` clock domain. Each clock it adds `TB_INC_PS` (a Q32.32 value in picoseconds, so non-integer periods accumulate without drift) and rolls fractional seconds over at 10¹² ps.
 
-**What a timestamp means.** DIFI defines a data packet's timestamp as the time its first sample is present at the SID location, which for a receive device is where the ADC generates samples (spec §5.1). In the test-source build the SID location is the test source output. The packetizer latches the timebase when the packet's first output sample leaves the DDC, which is later than the corresponding input instant by the DDC's group delay. It subtracts `TS_PIPE_DELAY_PS` from the latched value (borrowing from the integer seconds when needed), so the prologue carries the SID-location time. The driver writes the group delay for the committed decimation, which is why the register is locked with `DDC_DECIM`.
+**What a timestamp means.** DIFI defines a data packet's timestamp as the time its first sample is present at the SID location, which for a receive device is where the ADC generates samples (spec §5.1). For the tones and zeros the SID location is the test source output; for the counter ramp, which is injected after the DDC, it is the DDC output. The packetizer latches the timebase when the packet's first output sample leaves the DDC, which is later than the corresponding input instant by the DDC's group delay. It subtracts `TS_PIPE_DELAY_PS` from the latched value (borrowing from the integer seconds when needed), so the prologue carries the SID-location time. The driver writes the group delay for the committed decimation, which is why the register is locked with `DDC_DECIM`, and writes 0 for the counter ramp, whose samples never pass through the DDC. `SRC_SEL` is locked too, so the source and the delay can only change together while disabled.
 
-An earlier draft put the DDC delay in the context packet's Timestamp Adjustment field instead. DIFI gives that field a different meaning: the delay from the reference point (the RF input) to the SID location. For the ADC build it is a per-board calibration of the analog front end and ADC latency, negative on receive; for the test source it is 0.
+An earlier draft put the DDC delay in the context packet's Timestamp Adjustment field instead. DIFI gives that field a different meaning: the delay from the reference point (the RF input) to the SID location. For the test source it is 0.
 
 Seeding has three stages. For the demo, the driver seeds from the Linux system clock (NTP or PTP disciplined) with `LOAD_NOW`, giving accuracy of a few milliseconds. With a PPS input, `ARM_PPS` gives sample-clock alignment, and `TB_PPS_ERR_PS` measures residual drift. The ZUBoard has no dedicated PPS input; it would come in on a Click or Pmod pin _(verify pinout)_. After each seed or alignment the driver updates `CTX_TS_CAL_TIME`. Lock state is not signalled in the stream: State and Event indicators are not supported, and the word is always 0 (see the deviation note under [Standard version](#standard-version)).
 
@@ -433,7 +436,7 @@ Full hardware offload would need a UDP/IP stack and MAC in the PL plus a second 
 
 **RTL simulation** (`hw/sim/`, cocotb) covers seven areas:
 
-- **Packetizer:** fed the counter-ramp source and compared bit-exactly against the Python reference model.
+- **Packetizer:** fed the counter-ramp source, which bypasses the DDC, and compared bit-exactly against the Python reference model. The packetizer is therefore checked independently of the DDC.
 - **Commit semantics:** a commit mid-packet takes effect at the boundary, with a context packet first, the change indicator set, and the same timestamp as the following data packet.
 - **Context rules:** context packets appear exactly where the [context rules](#context-packet-rules) require, with the change indicator only on start and commit.
 - **Timestamps:** a single test tone with a known phase at a known timebase instant; the output phase at each packet's timestamp must match the prediction, which checks `TS_PIPE_DELAY_PS` for each decimation.
@@ -481,12 +484,31 @@ The Consortium's tooling is the best available oracle, but it is not the spec. K
 
 ---
 
+## Future features
+
+Features planned beyond the baseline. The baseline does not implement them, but the register map already reserves what they need, marked **RSVD (growth)**, so adding one does not move existing registers. Each entry lists its claimed allocations.
+
+### Direct-sampling HF ADC
+
+A direct-sampling HF ADC is added as a second signal input, selected by the source mux ahead of the DDC; the test source stays available. The ADC produces real samples at `FS_IN`, which the DDC converts to complex baseband, as it already does for the test tones. The test source mimics this input (real samples, the same input width, left-justified in 16 bits), so the DDC and everything after it are exercised today as they will be with the ADC.
+
+- **Reference point.** The board has no analog IF, so the RF converter analog port (the ADC input connector) is the natural reference point. The test source already uses reference point 75, so the context field values do not change when the ADC is added.
+- **Timestamp Adjustment.** With the ADC, `CTX_TS_ADJUST` becomes a per-board calibration of the analog front end plus ADC latency, from the input connector to the point where the ADC generates samples; negative on receive.
+- **Bit-true DDC check.** With a real counter ramp fed into the DDC input, the DDC can be compared bit-exactly against a bit-true model (own RTL, or the C models of the AMD CIC and FIR compilers). This is separate from the packetizer check, which uses the post-DDC ramp.
+
+| Claimed allocation | Use |
+|---|---|
+| `CAPS` bit 1 | Build has an ADC input |
+| `SRC_SEL` = 0 | Select the ADC input (rejected with `0x05` until then) |
+
+---
+
 ## Open decisions and TODO
 
 - [x] Choose the DIFI revision: v1.2.1, Information Class `0x0000` (see [Standard version](#standard-version)).
 - [x] Resolve the DIFI field values from the Consortium's spec references, packet definitions and captures (see [Field values](#field-values)).
 - [ ] Optional: cross-check against the official DIFI v1.2.1 text if it becomes available (request form at dificonsortium.org, business email required, sends 1.3.0 by default). Nothing in the design depends on it.
-- [ ] Fix `FS_IN` for the test-source build and the decimation range for the target HF bandwidths, so that `FS_IN_HZ` / `DDC_DECIM` is a whole number of hertz for every supported decimation. Check the rates against DIFI's Sample Rate Vendor Interoperability list.
+- [ ] Fix `FS_IN` and the input sample width for the test-source build, and the decimation range for the target HF bandwidths, so that `FS_IN_HZ` / `DDC_DECIM` is a whole number of hertz for every supported decimation. Check the rates against DIFI's Sample Rate Vendor Interoperability list.
 - [ ] Choose the DDC implementation: AMD CIC and FIR compilers, or own RTL. Its group delay per decimation feeds `TS_PIPE_DELAY_PS`.
 - [x] Jumbo frames: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [x] State and Event indicators: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
