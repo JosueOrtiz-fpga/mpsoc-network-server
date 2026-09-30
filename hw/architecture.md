@@ -226,7 +226,7 @@ One AXI4-Lite slave, 4 KB aperture. The base address is assigned in the block de
 | `0x000`–`0x01F` | Identification and capabilities |
 | `0x020`–`0x03F` | Control and commit |
 | `0x040`–`0x0FF` | Status, interrupts, counters |
-| `0x100`–`0x13F` | Stream configuration (`0x130`–`0x13F` reserved for version flow) |
+| `0x100`–`0x13F` | Stream configuration |
 | `0x140`–`0x17F` | Signal chain |
 | `0x180`–`0x1FF` | Context field values |
 | `0x200`–`0x23F` | Timebase |
@@ -243,7 +243,7 @@ One AXI4-Lite slave, 4 KB aperture. The base address is assigned in the block de
 | `0x010` | `DECIM_RANGE` | RO | 15:0 min, 31:16 max | build | Legal `DDC_DECIM` range. |
 | `0x014` | `FS_IN_HZ` | RO | 31:0 | build | Nominal input sample rate in Hz. The driver derives output rate, NCO increments and timebase increment from it. |
 | `0x018` | `SCRATCH` | RW | 31:0 | `0` | Bus sanity check; no effect. |
-| `0x01C` | `DIFI_SPEC` | RO | 31:24 major, 23:16 minor, 15:8 patch | `0x0102_0100` | DIFI revision this build conforms to (1.2.1; see [Standard version](#standard-version)). Also declared in version context packets. The driver logs it and refuses revisions it does not know. |
+| `0x01C` | `DIFI_SPEC` | RO | 31:24 major, 23:16 minor, 15:8 patch | `0x0102_0100` | DIFI revision this build conforms to (1.2.1; see [Standard version](#standard-version)). The driver logs it and refuses revisions it does not know. |
 
 ### Control and commit (`0x020`)
 
@@ -542,7 +542,6 @@ GPS time as the integer-seconds timestamp (TSI GPS). The PL's part is small: the
 - [x] Jumbo frames: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [x] State and Event indicators: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [ ] Decide the UDP destination model: fixed host IP and port from config, or discovery.
-- [ ] Add Version Flow (Information Class `0x0001`) only if a consumer appears.
 - [ ] Revisit the revision when `certify_source.py` supports 1.3.x.
 - [ ] Decide when to move from UIO + `udmabuf` to the kernel driver.
 - [ ] Wire the interrupt to `pl_ps_irq0` (same fix as `axi_iic_0`).
