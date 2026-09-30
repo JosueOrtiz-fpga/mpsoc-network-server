@@ -422,6 +422,9 @@ The mixer sits upstream of the decimation filters, so a retune applied at the ou
 
 The filters still blend old and new tuning for about half their impulse response on either side of s_k, so the last samples of packet k − 1 and the first samples of packet k carry a short transient, as in any DDC. The blend lasts about the filters' total impulse response: (L + 5) / 4 output samples, where L is the FIR's tap count and the 5 comes from the five-stage CIC, split roughly evenly across the boundary. With a 64-tap FIR, that is about 17 samples, about 5% of a 360-sample packet: 0.35 ms at 48 kS/s, 9 µs at 1.92 MS/s. It does not depend on the decimation, because the CIC and FIR spans scale with R together. Retune latency, from commit to s_k, is between one pipeline delay and one packet plus one pipeline delay.
 
+![Blend Timing diagram](retune_timing_input_side_switch.svg)
+![Filter Blend diagram](ddc_filter_window_across_retune.svg)
+
 ---
 
 ## Loss accounting and error handling
