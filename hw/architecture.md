@@ -45,7 +45,7 @@ In scope: the PL signal chain and packetizer, the PS control plane and UDP trans
 
 **Deviation: no jumbo frames.** DIFI §2.2 requires every endpoint to support 9000-byte jumbo frames. This design deliberately does not: packets are limited to a 1500-byte MTU (at most 361 samples). Every packet it sends is still valid DIFI, because DIFI allows any Ethernet payload from 128 to 9000 octets; only the endpoint capability is missing. We control both ends of the link, so no sink will need larger packets, and the choice keeps switches, the host NIC and GEM2 out of the requirements. It does rule out a formal conformance claim. The project README records this deviation.
 
-**Deviation: no State and Event indicators.** DIFI §4.3.1 expects the context packet's State and Event word to report calibrated-time lock (bit 19) and frequency-reference lock (bit 17), updated about once per second. This design does not report them: the word is always `0x00000000`, with every enable bit clear, which VITA 49.2 defines as no indicator in use. The context packet stays structurally valid, because the word is present as CIF0 requires; only the reporting is missing. Receivers therefore cannot tell from the stream whether timestamps are NTP- or PPS-disciplined; Timestamp Calibration Time still says when the timebase was last seeded. In DIFI the transmit side uses these bits (for example, to decide whether Programmed Delay mode is possible), and this design has no transmit side, so nothing in our chain consumes them. Like the jumbo-frame deviation, it rules out a formal conformance claim, and the project README records it.
+**Deviation: no State and Event indicators.** DIFI §4.3.1 expects the context packet's State and Event word to report calibrated-time lock (bit 19) and frequency-reference lock (bit 17), updated about once per second. This design does not report them: the word is always `0x00000000`, with every enable bit clear, which VITA 49.2 defines as no indicator in use. The context packet stays structurally valid, because the word is present as CIF0 requires; only the reporting is missing. Receivers therefore cannot tell from the stream how accurate the timestamps are; Timestamp Calibration Time still says when the timebase was last seeded. In DIFI the transmit side uses these bits (for example, to decide whether Programmed Delay mode is possible), and this design has no transmit side, so nothing in our chain consumes them. Like the jumbo-frame deviation, it rules out a formal conformance claim, and the project README records it.
 
 ---
 
@@ -217,7 +217,7 @@ One AXI4-Lite slave, 4 KB aperture. The base address is assigned in the block de
 
 64-bit quantities are split `_HI` (bits 63:32) / `_LO` (bits 31:0). They are either shadowed, so the commit makes them atomic, or snapshotted, so readback is coherent.
 
-**RSVD (growth)** marks a bit or field encoding already claimed by a planned feature; [Future features](#future-features) lists each claim. It behaves like any reserved bit or value in this build: read-only bits read as 0, and a commit that writes a growth encoding to a checked field is rejected with the error code given in that field's description. Growth allocations are not reassigned to anything else.
+**RSVD (growth)** marks a bit or field encoding already claimed by a planned feature; [Future features](#future-features) lists each claim. Growth bits and registers are not implemented in this build: they read as 0 and writes to them are ignored, and software writes 0 to them. A growth encoding of a commit-checked field is rejected with the error code given in that field's description. Growth allocations are not reassigned to anything else.
 
 ### Block summary
 
@@ -239,7 +239,7 @@ One AXI4-Lite slave, 4 KB aperture. The base address is assigned in the block de
 | `0x000` | `ID` | RO | 31:0 | `0x4449_4649` | ASCII `"DIFI"`. The first read after overlay load; HIL `test_pl_regs` checks it. |
 | `0x004` | `VERSION` | RO | 31:24 major, 23:16 minor, 15:0 patch | build | Register map version. The major number changes on any incompatible change; the driver refuses unknown majors. |
 | `0x008` | `BUILD_SHA` | RO | 31:0 | build | First 32 bits of the git SHA used for the bitstream (`GIT_SHA` in `hw/Makefile`); ties the running PL to its `<stem>`. |
-| `0x00C` | `CAPS` | RO | 0 test source, 1 RSVD (growth), 2 PPS input, 3 decimation power-of-two only, 15:8 sample bits, 31:16 max samples per packet | build | Build-time features the driver must check before configuring. Max samples per packet is 361 (1500-byte MTU; see [Sizing](#sizing)). |
+| `0x00C` | `CAPS` | RO | 0 test source, 1 RSVD (growth), 2 RSVD (growth), 3 decimation power-of-two only, 15:8 sample bits, 31:16 max samples per packet | build | Build-time features the driver must check before configuring. Max samples per packet is 361 (1500-byte MTU; see [Sizing](#sizing)). |
 | `0x010` | `DECIM_RANGE` | RO | 15:0 min, 31:16 max | build | Legal `DDC_DECIM` range. |
 | `0x014` | `FS_IN_HZ` | RO | 31:0 | build | Nominal input sample rate in Hz. The driver derives output rate, NCO increments and timebase increment from it. |
 | `0x018` | `SCRATCH` | RW | 31:0 | `0` | Bus sanity check; no effect. |
@@ -272,8 +272,8 @@ A rejected commit leaves the active set unchanged and sets `STICKY.COMMIT_REJECT
 
 | Offset | Name | Access | Bits | Reset | Description |
 |---|---|---|---|---|---|
-| `0x040` | `STATUS` | RO | 0 `RUNNING`, 1 `TIMEBASE_VALID`, 2 `PPS_PRESENT` | `0` | Live state. `TIMEBASE_VALID` is set after the first seed load. |
-| `0x044` | `STICKY` | W1C | 0 `FIFO_OVERFLOW`, 1 `COMMIT_REJECTED`, 2 `PPS_LOST`, 3 `TIMEBASE_STEP`, 4 `DDC_CLIP`, 5 `COMMIT_DONE` | `0` | Latched events. `TIMEBASE_STEP` marks a seed loaded while running. `DDC_CLIP` marks saturation at the DDC output. |
+| `0x040` | `STATUS` | RO | 0 `RUNNING`, 1 `TIMEBASE_VALID`, 2 RSVD (growth) | `0` | Live state. `TIMEBASE_VALID` is set after the first seed load. |
+| `0x044` | `STICKY` | W1C | 0 `FIFO_OVERFLOW`, 1 `COMMIT_REJECTED`, 2 RSVD (growth), 3 `TIMEBASE_STEP`, 4 `DDC_CLIP`, 5 `COMMIT_DONE` | `0` | Latched events. `TIMEBASE_STEP` marks a seed loaded while running. `DDC_CLIP` marks saturation at the DDC output. |
 | `0x048` | `IRQ_ENABLE` | RW | same bits as `STICKY` | `0` | IRQ output = OR of (`STICKY` AND `IRQ_ENABLE`). Level-sensitive, to `pl_ps_irq0`. |
 | `0x050` | `SNAP_CTRL` | SC | 0 `SNAPSHOT`, 1 `CLEAR_COUNTERS` | `0` | `SNAPSHOT` latches all **N** registers coherently across clock domains. `CLEAR_COUNTERS` zeroes the counters and the FIFO high-water mark. |
 | `0x054` | `CNT_DATA_PKTS` | RO N | 31:0 | `0` | Data packets emitted (wraps). |
@@ -325,7 +325,7 @@ These registers are copied verbatim into context packets. The driver computes th
 | `0x1A8` | — | — | — | Reserved. The Gain word is reserved in v1.2.1; the PL always emits 0. |
 | `0x1AC`/`0x1B0` | `CTX_SAMPLE_RATE_HI/_LO` | RW S | Q44.20 Hz, integer | Output sample rate; must equal `FS_IN_HZ` / `DDC_DECIM` exactly. |
 | `0x1B4`/`0x1B8` | `CTX_TS_ADJUST_HI/_LO` | RW S | 64-bit signed, fs | Delay from the reference point to the SID location; 0 for the test source. Not the DDC delay (see [Timebase](#timebase-and-timestamps)). |
-| `0x1BC` | `CTX_TS_CAL_TIME` | RW S | 32-bit, s | Last time the timestamp was known correct: integer seconds (in the `TSI_SEL` epoch) of the last seed or PPS alignment. |
+| `0x1BC` | `CTX_TS_CAL_TIME` | RW S | 32-bit, s | Last time the timestamp was known correct: integer seconds (in the `TSI_SEL` epoch) of the last seed. |
 | `0x1C0` | — | — | — | Reserved. State and Event indicators are not supported (see [Standard version](#standard-version)); the PL always emits 0. |
 | `0x1C4` | `CTX_CIF0` | RO | 32-bit | `0x7BB98000`, the field set this build emits. The PL sets bit 31 on context packets that announce a change. |
 
@@ -335,13 +335,13 @@ The sample rate is supplied by software rather than derived in the PL, which kee
 
 | Offset | Name | Access | Bits | Reset | Description |
 |---|---|---|---|---|---|
-| `0x200` | `TB_CTRL` | RW | 0 `LOAD_NOW` (SC), 1 `ARM_PPS`, 2 `PPS_EN`, 3 `PPS_INVERT` | `0` | `LOAD_NOW` loads the seed immediately. `ARM_PPS` loads it on the next PPS edge and clears itself when done. |
+| `0x200` | `TB_CTRL` | RW | 0 `LOAD_NOW` (SC), 3:1 RSVD (growth) | `0` | `LOAD_NOW` loads the seed immediately. |
 | `0x204` | `TB_SEED_SEC` | RW | 31:0 | `0` | Integer seconds to load, in the `TSI_SEL` epoch (POSIX by default); fractional part resets to 0 on load. |
 | `0x208` | `TB_INC_PS_INT` | RW | 31:0 | build | Picoseconds per `FS_IN` clock, integer part. |
 | `0x20C` | `TB_INC_PS_FRAC` | RW | 31:0 | build | Fractional part, in units of 2⁻³² ps. |
 | `0x210` | `TB_NOW_SEC` | RO N | 31:0 | `0` | Current integer seconds. |
 | `0x214`/`0x218` | `TB_NOW_PS_HI/_LO` | RO N | 63:0 | `0` | Current fractional seconds, in picoseconds. |
-| `0x21C` | `TB_PPS_ERR_PS` | RO | 31:0 signed | `0` | Fractional value observed at the last PPS edge; ideally 0. Drift monitor. |
+| `0x21C` | — | — | — | — | RSVD (growth). |
 | `0x220`/`0x224` | `TS_PIPE_DELAY_PS_HI/_LO` | RW S L | 63:0 | build | Delay from the SID location to the packetizer, in picoseconds (the DDC group delay for the committed decimation). Subtracted from every latched timestamp. 0 when `SRC_SEL` selects the counter ramp, which bypasses the DDC. |
 
 ---
@@ -353,11 +353,11 @@ The sample rate is supplied by software rather than derived in the PL, which kee
 1. **Load the PL.** FPGA Manager applies the overlay (`<stem>.bit.bin` + `<stem>.dtbo`); the register bank, DMA and interrupt nodes appear, and the driver probes.
 2. **Identify.** Read `ID`, `VERSION`, `BUILD_SHA`, `CAPS`, `DECIM_RANGE`, `FS_IN_HZ`, `DIFI_SPEC`. Abort on a wrong `ID` or unknown `VERSION` major. Write and read back `SCRATCH`.
 3. **Quiesce.** Write `CTRL.SOFT_RESET`, confirm `STATUS.RUNNING=0`, write 1s to clear `STICKY`, write `SNAP_CTRL.CLEAR_COUNTERS`.
-4. **Seed the timebase.** Write `TB_INC_PS_INT/FRAC` (10¹² / `FS_IN_HZ`) and `TB_SEED_SEC` (POSIX seconds from the Linux clock). Then either write `TB_CTRL.LOAD_NOW` just after a second boundary of the system clock, or set `PPS_EN` and `ARM_PPS` and wait for `STATUS.TIMEBASE_VALID`.
+4. **Seed the timebase.** Write `TB_INC_PS_INT/FRAC` (10¹² / `FS_IN_HZ`) and `TB_SEED_SEC` (POSIX seconds from the Linux clock). Then write `TB_CTRL.LOAD_NOW` just after a second boundary of the system clock, and confirm `STATUS.TIMEBASE_VALID`.
 5. **Configure.** Write all stream, signal chain and context registers (shadow set). Derive `CTX_SAMPLE_RATE`, `CTX_BANDWIDTH` and `CTX_RF_REF_FREQ` from the same inputs used for `DDC_DECIM` and `DDC_PHASE_INC`, and refuse a decimation whose output rate is not a whole number of hertz. Write `TS_PIPE_DELAY_PS` for the decimation (0 for the counter ramp), and `CTX_TS_CAL_TIME` from the seed in step 4.
 6. **Commit.** Write `COMMIT.COMMIT`, wait for `COMMIT_STATUS.PENDING=0`, check `ERROR=0`. While disabled, the commit applies immediately.
 7. **Arm the DMA ring.** Queue all slots to the S2MM channel before the source can produce data.
-8. **Enable interrupts.** Set `IRQ_ENABLE` for at least `FIFO_OVERFLOW`, `COMMIT_REJECTED`, `COMMIT_DONE` and `PPS_LOST`.
+8. **Enable interrupts.** Set `IRQ_ENABLE` for at least `FIFO_OVERFLOW`, `COMMIT_REJECTED` and `COMMIT_DONE`.
 9. **Start.** Start the UDP sender, then set `CTRL.ENABLE`. The first packet on the wire is a context packet with the change indicator set, followed by the data packet with the same timestamp.
 
 ### Runtime reconfiguration (for example, a retune)
@@ -387,7 +387,7 @@ The timebase is a counter in the `FS_IN` clock domain. Each clock it adds `TB_IN
 
 An earlier draft put the DDC delay in the context packet's Timestamp Adjustment field instead. DIFI gives that field a different meaning: the delay from the reference point (the RF input) to the SID location. For the test source it is 0.
 
-Seeding has three stages. For the demo, the driver seeds from the Linux system clock (NTP or PTP disciplined) with `LOAD_NOW`, giving accuracy of a few milliseconds. With a PPS input, `ARM_PPS` gives sample-clock alignment, and `TB_PPS_ERR_PS` measures residual drift. The ZUBoard has no dedicated PPS input; it would come in on a Click or Pmod pin _(verify pinout)_. After each seed or alignment the driver updates `CTX_TS_CAL_TIME`. Lock state is not signalled in the stream: State and Event indicators are not supported, and the word is always 0 (see the deviation note under [Standard version](#standard-version)).
+The driver seeds the timebase from the Linux system clock (NTP or PTP disciplined) with `LOAD_NOW`, giving accuracy of a few milliseconds, and updates `CTX_TS_CAL_TIME` after each seed. Lock state is not signalled in the stream: State and Event indicators are not supported, and the word is always 0 (see the deviation note under [Standard version](#standard-version)).
 
 ---
 
@@ -501,6 +501,22 @@ A direct-sampling HF ADC is added as a second signal input, selected by the sour
 | `CAPS` bit 1 | Build has an ADC input |
 | `SRC_SEL` = 0 | Select the ADC input (rejected with `0x05` until then) |
 
+### PPS timebase alignment
+
+A PPS input aligns the timebase to the sample clock, beyond the few milliseconds that seeding from the Linux clock gives. The driver writes `TB_SEED_SEC` for the coming second, sets `PPS_EN` and `ARM_PPS`, and waits for `STATUS.TIMEBASE_VALID`; the PL loads the seed on the next PPS edge and clears `ARM_PPS`. At every later edge the PL records the fractional seconds in `TB_PPS_ERR_PS` (ideally 0) as a drift monitor, and `STICKY.PPS_LOST` latches when expected edges stop arriving. The driver updates `CTX_TS_CAL_TIME` after each alignment, as it does after each seed.
+
+- **Pin.** The ZUBoard has no dedicated PPS input; it would come in on a Click or Pmod pin _(verify pinout)_.
+- **Clock-domain crossing.** PPS is an asynchronous external input and needs its own synchronizer into the `FS_IN` domain. It is a third crossing, an exception to the principle that the commit and snapshot handshakes are the only ones (see [Principles](#principles)).
+- **State and Event indicators.** With PPS alignment, DIFI's calibrated-time lock indicator would have something real to report. The deviation (see [Standard version](#standard-version)) could be reconsidered then; the word at `0x1C0` is plain reserved, not claimed.
+
+| Claimed allocation | Use |
+|---|---|
+| `CAPS` bit 2 | Build has a PPS input |
+| `STATUS` bit 2 | `PPS_PRESENT`: PPS edges are arriving |
+| `STICKY` bit 2 (and `IRQ_ENABLE` bit 2) | `PPS_LOST`: expected PPS edges stopped |
+| `TB_CTRL` bits 3:1 | `ARM_PPS` (load the seed on the next edge, self-clearing), `PPS_EN`, `PPS_INVERT` |
+| `0x21C` | `TB_PPS_ERR_PS`: signed fractional seconds at the last PPS edge, in picoseconds |
+
 ---
 
 ## Open decisions and TODO
@@ -513,7 +529,7 @@ A direct-sampling HF ADC is added as a second signal input, selected by the sour
 - [x] Jumbo frames: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [x] State and Event indicators: not supported, by design (see [Standard version](#standard-version)); recorded in the project README.
 - [ ] Decide the UDP destination model: fixed host IP and port from config, or discovery.
-- [ ] Pick the PPS source and pin, if and when timing accuracy beyond NTP matters. Consider `TSI_SEL` = GPS if it is GPS-disciplined.
+- [ ] Consider `TSI_SEL` = GPS if a GPS-disciplined PPS is added.
 - [ ] Add Version Flow (Information Class `0x0001`) only if a consumer appears.
 - [ ] Revisit the revision when `certify_source.py` supports 1.3.x.
 - [ ] Decide when to move from UIO + `udmabuf` to the kernel driver.
