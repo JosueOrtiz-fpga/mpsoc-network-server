@@ -104,6 +104,7 @@ hil_id=$(. "$wt/out/hil/stage.env" && echo "$HIL_ID")
 cp -a "$wt/out/hil/$hil_id/latest/." "$stage/hil/"
 
 # Release notes: the facts filled in, the rest left for a person (see the template).
+# The template's leading <!-- ... --> block is for whoever edits the template; it stays out.
 junit="$stage/hil/junit.xml"
 hil_summary=$(python3 - "$junit" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -114,7 +115,8 @@ print(f"{s.get('tests')} tests, {s.get('failures')} failures, {s.get('errors')} 
       f"{s.get('skipped')} skipped" + "".join(f"; {k} = {v}" for k, v in props.items()))
 PY
 )
-sed -e "s|@TAG@|$tag|g" \
+sed -e '/^<!--$/,/^-->$/d' \
+    -e "s|@TAG@|$tag|g" \
     -e "s|@DATE@|$(date -u +%Y-%m-%d)|g" \
     -e "s|@COMMIT@|$(git rev-parse --short=12 "$tag^{commit}")|g" \
     -e "s|@PL_STEM@|$stem|g" \
@@ -124,7 +126,8 @@ sed -e "s|@TAG@|$tag|g" \
     "$root/docs/release-notes-template.md" > "$stage/RELEASE_NOTES.md"
 
 cp -a "$log" "$stage/release.log"
-( cd "$stage" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS )
+# RELEASE_NOTES.md is completed by hand after this, so it carries no checksum.
+( cd "$stage" && find . -type f ! -name SHA256SUMS ! -name RELEASE_NOTES.md -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS )
 
 # Never overwrite: -T with a missing target is a rename; it fails if dest appeared meanwhile.
 [ ! -e "$dest" ] || die "$dest appeared during the build; this attempt stays in $stage"
