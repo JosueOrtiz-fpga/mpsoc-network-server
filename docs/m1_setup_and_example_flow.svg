@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 880 1180" role="img">
+<title>M1 setup and an example data and control flow</title>
+<desc>Panel 1: on LNXPC, a pytest run drives the difi_ref model through its registers; the model's packets go to a stream checker with validate() and through a UDP replay tool into a GNU Radio flowgraph with the gr-difi DIFI Source, whose tags and FFT result go back to the test. Panel 2: a sequence diagram of one run. The test writes the shadow registers, commits, seeds the timebase and enables the stream; the packetizer emits a context packet with the change indicator and then data packets every 1.875 ms; the replay tool sends them to gr-difi, which reports a context tag and a tone. A retune commit while running produces a context packet with the change indicator at the next packet boundary, sharing the timestamp of the following data packet, and gr-difi reports the new frequency.</desc>
+
+<style>
+  text { font-family: "anthropic-sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0b0b0b; }
+  .bg { fill: #ffffff; }
+  .frame { fill: none; stroke: rgba(11,11,11,0.25); stroke-width: 0.75; }
+  .dash { stroke-dasharray: 4 4; }
+  .flabel { font-size: 12px; fill: #52514e; }
+  .flabel-b { font-size: 12px; font-weight: 600; fill: #3d3d3a; }
+  .t { font-size: 14px; font-weight: 500; }
+  .s { font-size: 12px; }
+  .xs { font-size: 11px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+  .note { font-size: 11px; fill: #52514e; }
+  .purple { fill: #eeedfe; stroke: #534ab7; stroke-width: 0.75; }
+  .purple-t { fill: #3c3489; } .purple-s { fill: #534ab7; }
+  .coral { fill: #faece7; stroke: #993c1d; stroke-width: 0.75; }
+  .coral-t { fill: #712b13; } .coral-s { fill: #993c1d; }
+  .teal { fill: #e1f5ee; stroke: #0f6e56; stroke-width: 0.75; }
+  .teal-t { fill: #085041; } .teal-s { fill: #0f6e56; }
+  .gray { fill: #f1efe8; stroke: #5f5e5a; stroke-width: 0.75; }
+  .gray-t { fill: #444441; } .gray-s { fill: #5f5e5a; }
+  .later { fill: none; stroke: #534ab7; stroke-width: 0.75; stroke-dasharray: 4 3; }
+  .badge-purple { fill: #534ab7; } .badge-coral { fill: #993c1d; } .badge-teal { fill: #0f6e56; } .badge-gray { fill: #5f5e5a; }
+  .badge-txt { font-size: 10px; font-weight: 700; fill: #ffffff; }
+  .flow { fill: none; stroke: #898781; stroke-width: 1.25; }
+  .ctl { fill: none; stroke: #993c1d; stroke-width: 1.25; stroke-dasharray: 4 3; }
+  .chk { fill: none; stroke: #0f6e56; stroke-width: 1.25; stroke-dasharray: 4 3; }
+  .lbl { font-size: 11px; fill: #52514e; }
+  .mk-flow { stroke: #898781; } .mk-ctl { stroke: #993c1d; } .mk-chk { stroke: #0f6e56; }
+  @media (prefers-color-scheme: dark) {
+    text { fill: #ecebe6; }
+    .bg { fill: #1f1e1c; }
+    .frame { stroke: rgba(236,235,230,0.3); }
+    .flabel, .note, .lbl { fill: #b5b3ab; }
+    .flabel-b { fill: #d6d4cc; }
+    .purple { fill: #2c2a4f; stroke: #a49cf0; } .purple-t { fill: #d9d5ff; } .purple-s { fill: #b9b2f5; }
+    .coral { fill: #4a2416; stroke: #ec9a78; } .coral-t { fill: #ffd9c9; } .coral-s { fill: #f2ad90; }
+    .teal { fill: #123a30; stroke: #5fc9a6; } .teal-t { fill: #c9f2e3; } .teal-s { fill: #8adcc0; }
+    .gray { fill: #34332f; stroke: #a8a69e; } .gray-t { fill: #e4e2da; } .gray-s { fill: #c2c0b8; }
+    .later { stroke: #a49cf0; }
+    .badge-purple { fill: #7a70e0; } .badge-coral { fill: #c4603a; } .badge-teal { fill: #2a9a7a; } .badge-gray { fill: #8a8882; }
+    .flow { stroke: #a8a69e; }
+    .ctl { stroke: #ec9a78; }
+    .chk { stroke: #5fc9a6; }
+    .mk-flow { stroke: #a8a69e; } .mk-ctl { stroke: #ec9a78; } .mk-chk { stroke: #5fc9a6; }
+  }
+</style>
+<defs><marker id="arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk-flow" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="arrow-ctl" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk-ctl" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="arrow-chk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk-chk" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect class="bg" x="0" y="0" width="880" height="1180" rx="12"/>
+<style>
+  .halo { paint-order: stroke; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; }
+  .life { stroke: rgba(11,11,11,0.22); stroke-width: 1; stroke-dasharray: 2 4; }
+  .phase { fill: rgba(11,11,11,0.04); }
+  .dot-chk { fill: #0f6e56; }
+  .step { font-size: 10px; font-weight: 700; fill: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    .halo { stroke: #1f1e1c; }
+    .life { stroke: rgba(236,235,230,0.25); }
+    .phase { fill: rgba(236,235,230,0.06); }
+    .dot-chk { fill: #5fc9a6; }
+  }
+</style>
+<rect class="frame" x="12" y="12" width="856" height="232" rx="12"/>
+<text class="flabel-b" x="26" y="30" dominant-baseline="central">1 · M1 setup, all on LNXPC</text>
+<rect class="gray" x="28" y="64" width="112" height="140" rx="8"/>
+<text class="t gray-t" x="84.0" y="88" text-anchor="middle" dominant-baseline="central">pytest</text>
+<text class="s gray-s" x="84.0" y="107" text-anchor="middle" dominant-baseline="central">make ref-rx-check</text>
+<text class="s gray-s" x="84.0" y="124" text-anchor="middle" dominant-baseline="central"></text>
+<text class="s gray-s" x="84.0" y="141" text-anchor="middle" dominant-baseline="central">drives the model,</text>
+<text class="s gray-s" x="84.0" y="158" text-anchor="middle" dominant-baseline="central">asserts results</text>
+<rect class="purple" x="244" y="64" width="214" height="64" rx="8"/>
+<text class="t purple-t" x="351.0" y="84" text-anchor="middle" dominant-baseline="central">difi_ref model</text>
+<text class="s purple-s" x="351.0" y="103" text-anchor="middle" dominant-baseline="central">register set · timebase · tone</text>
+<text class="s purple-s" x="351.0" y="120" text-anchor="middle" dominant-baseline="central">→ reference packetizer</text>
+<rect class="purple" x="512" y="64" width="122" height="64" rx="8"/>
+<text class="t purple-t" x="573.0" y="84" text-anchor="middle" dominant-baseline="central">UDP replay</text>
+<text class="s purple-s" x="573.0" y="103" text-anchor="middle" dominant-baseline="central">paced by packet</text>
+<text class="s purple-s" x="573.0" y="120" text-anchor="middle" dominant-baseline="central">timestamps</text>
+<rect class="gray" x="688" y="64" width="172" height="64" rx="8"/>
+<text class="t gray-t" x="774.0" y="84" text-anchor="middle" dominant-baseline="central">GNU Radio 3.10</text>
+<text class="s gray-s" x="774.0" y="103" text-anchor="middle" dominant-baseline="central">gr-difi DIFI Source</text>
+<text class="s gray-s" x="774.0" y="120" text-anchor="middle" dominant-baseline="central">→ tag probe · FFT</text>
+<rect class="teal" x="244" y="158" width="214" height="46" rx="8"/>
+<text class="t teal-t" x="351.0" y="181" text-anchor="middle" dominant-baseline="central">Stream checker + validate()</text>
+<path class="ctl" d="M140 96.0 H242" marker-end="url(#arrow-ctl)"/>
+<text class="lbl" x="192.0" y="74.0" text-anchor="middle" dominant-baseline="central">registers,</text>
+<text class="lbl" x="192.0" y="87.0" text-anchor="middle" dominant-baseline="central">COMMIT, ENABLE</text>
+<path class="flow" d="M458 96.0 H510" marker-end="url(#arrow-flow)"/>
+<text class="lbl" x="485.0" y="86.0" text-anchor="middle" dominant-baseline="central">packets</text>
+<path class="flow" d="M634 96.0 H686" marker-end="url(#arrow-flow)"/>
+<text class="lbl" x="661.0" y="86.0" text-anchor="middle" dominant-baseline="central">UDP</text>
+<path class="flow" d="M351.0 128 V156" marker-end="url(#arrow-flow)"/>
+<text class="lbl" x="359.0" y="143.0" text-anchor="start" dominant-baseline="central">every packet</text>
+<path class="chk" d="M244 181 H142" marker-end="url(#arrow-chk)"/>
+<text class="lbl" x="192.0" y="171" text-anchor="middle" dominant-baseline="central">pass / fail</text>
+<path class="chk" d="M774.0 128 V226 H84.0 V206" marker-end="url(#arrow-chk)"/>
+<text class="lbl" x="766.0" y="216" text-anchor="end" dominant-baseline="central">context tags, gap tags, FFT peak</text>
+<rect class="frame" x="12" y="262" width="856" height="858" rx="12"/>
+<text class="flabel-b" x="26" y="280" dominant-baseline="central">2 · Example run: a 192 kS/s tone stream, then a retune</text>
+<line class="life" x1="82" y1="338" x2="82" y2="1032"/>
+<rect class="gray" x="28.0" y="298" width="108" height="40" rx="8"/>
+<text class="t gray-t" x="82.0" y="318" text-anchor="middle" dominant-baseline="central">pytest</text>
+<line class="life" x1="200" y1="338" x2="200" y2="1032"/>
+<rect class="coral" x="146.0" y="298" width="108" height="40" rx="8"/>
+<text class="t coral-t" x="200.0" y="318" text-anchor="middle" dominant-baseline="central">Register set</text>
+<line class="life" x1="318" y1="338" x2="318" y2="1032"/>
+<rect class="purple" x="264.0" y="298" width="108" height="40" rx="8"/>
+<text class="t purple-t" x="318.0" y="318" text-anchor="middle" dominant-baseline="central">Timebase, tone</text>
+<line class="life" x1="436" y1="338" x2="436" y2="1032"/>
+<rect class="purple" x="382.0" y="298" width="108" height="40" rx="8"/>
+<text class="t purple-t" x="436.0" y="318" text-anchor="middle" dominant-baseline="central">Packetizer</text>
+<line class="life" x1="554" y1="338" x2="554" y2="1032"/>
+<rect class="teal" x="500.0" y="298" width="108" height="40" rx="8"/>
+<text class="t teal-t" x="554.0" y="318" text-anchor="middle" dominant-baseline="central">Checker</text>
+<line class="life" x1="672" y1="338" x2="672" y2="1032"/>
+<rect class="purple" x="618.0" y="298" width="108" height="40" rx="8"/>
+<text class="t purple-t" x="672.0" y="318" text-anchor="middle" dominant-baseline="central">UDP replay</text>
+<line class="life" x1="800" y1="338" x2="800" y2="1032"/>
+<rect class="gray" x="746.0" y="298" width="108" height="40" rx="8"/>
+<text class="t gray-t" x="800.0" y="318" text-anchor="middle" dominant-baseline="central">gr-difi</text>
+<rect class="teal" x="549" y="632" width="10" height="392" rx="2"/>
+<rect class="phase" x="24" y="353" width="832" height="22" rx="4"/>
+<text class="flabel-b" x="36" y="364" text-anchor="start" dominant-baseline="central">Configure  ·  ENABLE = 0</text>
+<path class="ctl" d="M82 396 H194" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="141.0" y="387" text-anchor="middle" dominant-baseline="central">write shadow</text>
+<circle class="badge-gray" cx="32" cy="396" r="9"/>
+<text class="badge-txt" x="32" y="396.5" text-anchor="middle" dominant-baseline="central">1</text>
+<text class="note halo" x="214" y="396.5" text-anchor="start" dominant-baseline="central">SRC_SEL = 1 (tone) · DDC_DECIM = 640 · SAMPLES_PER_PKT = 360 · CTX_INTERVAL = 533</text>
+<text class="note halo" x="214" y="412" text-anchor="start" dominant-baseline="central">CTX_SAMPLE_RATE = 192 kHz · CTX_RF_REF_FREQ = 7.1 MHz</text>
+<path class="ctl" d="M82 442 H194" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="141.0" y="433" text-anchor="middle" dominant-baseline="central">COMMIT</text>
+<circle class="badge-gray" cx="32" cy="442" r="9"/>
+<text class="badge-txt" x="32" y="442.5" text-anchor="middle" dominant-baseline="central">2</text>
+<text class="note halo" x="214" y="442.5" text-anchor="start" dominant-baseline="central">validated (codes 0x01–0x08), applied at once while disabled; COMMIT_STATUS.SEQ = 1</text>
+<path class="ctl" d="M82 476 H312" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="200.0" y="467" text-anchor="middle" dominant-baseline="central">TB_SEED_SEC, LOAD_NOW</text>
+<circle class="badge-gray" cx="32" cy="476" r="9"/>
+<text class="badge-txt" x="32" y="476.5" text-anchor="middle" dominant-baseline="central">3</text>
+<text class="note halo" x="332" y="476.5" text-anchor="start" dominant-baseline="central">seeded from the host clock, POSIX seconds</text>
+<rect class="phase" x="24" y="499" width="832" height="22" rx="4"/>
+<text class="flabel-b" x="36" y="510" text-anchor="start" dominant-baseline="central">Start streaming</text>
+<path class="ctl" d="M82 542 H194" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="141.0" y="533" text-anchor="middle" dominant-baseline="central">CTRL.ENABLE = 1</text>
+<circle class="badge-gray" cx="32" cy="542" r="9"/>
+<text class="badge-txt" x="32" y="542.5" text-anchor="middle" dominant-baseline="central">4</text>
+<path class="ctl" d="M200 576 H430" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="318.0" y="567" text-anchor="middle" dominant-baseline="central">active set</text>
+<circle class="badge-gray" cx="32" cy="576" r="9"/>
+<text class="badge-txt" x="32" y="576.5" text-anchor="middle" dominant-baseline="central">5</text>
+<path class="flow" d="M318 610 H430" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="377.0" y="601" text-anchor="middle" dominant-baseline="central">samples, time</text>
+<circle class="badge-gray" cx="32" cy="610" r="9"/>
+<text class="badge-txt" x="32" y="610.5" text-anchor="middle" dominant-baseline="central">6</text>
+<text class="note halo" x="304" y="610.5" text-anchor="end" dominant-baseline="central">tone at 192 kS/s, Q32.32 ps</text>
+<path class="flow" d="M436 644 H666" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="554.0" y="635" text-anchor="middle" dominant-baseline="central">context · CIF0 0xFBB98000 · ts T₀</text>
+<circle class="dot-chk" cx="554" cy="644" r="3.5"/>
+<circle class="badge-gray" cx="32" cy="644" r="9"/>
+<text class="badge-txt" x="32" y="644.5" text-anchor="middle" dominant-baseline="central">7</text>
+<path class="flow" d="M436 678 H666" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="554.0" y="669" text-anchor="middle" dominant-baseline="central">data #0, #1, … · ts T₀ + n × 1.875 ms</text>
+<circle class="dot-chk" cx="554" cy="678" r="3.5"/>
+<circle class="badge-gray" cx="32" cy="678" r="9"/>
+<text class="badge-txt" x="32" y="678.5" text-anchor="middle" dominant-baseline="central">8</text>
+<path class="flow" d="M672 712 H794" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="736.0" y="703" text-anchor="middle" dominant-baseline="central">UDP, paced by ts</text>
+<circle class="badge-gray" cx="32" cy="712" r="9"/>
+<text class="badge-txt" x="32" y="712.5" text-anchor="middle" dominant-baseline="central">9</text>
+<path class="chk" d="M800 746 H88" marker-end="url(#arrow-chk)"/>
+<text class="lbl halo" x="441.0" y="737" text-anchor="middle" dominant-baseline="central">context tag: 192 kS/s, 7.1 MHz · no gap tags after the first · FFT peak at the tone</text>
+<circle class="badge-gray" cx="32" cy="746" r="9"/>
+<text class="badge-txt" x="32" y="746.5" text-anchor="middle" dominant-baseline="central">10</text>
+<rect class="phase" x="24" y="769" width="832" height="22" rx="4"/>
+<text class="flabel-b" x="36" y="780" text-anchor="start" dominant-baseline="central">Retune  ·  the pre-check's second run, commit while enabled</text>
+<path class="ctl" d="M82 812 H194" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="141.0" y="803" text-anchor="middle" dominant-baseline="central">COMMIT</text>
+<circle class="badge-gray" cx="32" cy="812" r="9"/>
+<text class="badge-txt" x="32" y="812.5" text-anchor="middle" dominant-baseline="central">11</text>
+<text class="note halo" x="214" y="812.5" text-anchor="start" dominant-baseline="central">DDC_PHASE_INC and CTX_RF_REF_FREQ = 14.2 MHz in one commit</text>
+<path class="ctl" d="M200 846 H430" marker-end="url(#arrow-ctl)"/>
+<text class="lbl halo" x="318.0" y="837" text-anchor="middle" dominant-baseline="central">applied at packet boundary k</text>
+<circle class="badge-gray" cx="32" cy="846" r="9"/>
+<text class="badge-txt" x="32" y="846.5" text-anchor="middle" dominant-baseline="central">12</text>
+<path class="flow" d="M436 880 H666" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="554.0" y="871" text-anchor="middle" dominant-baseline="central">context · change indicator · ts Tₖ</text>
+<circle class="dot-chk" cx="554" cy="880" r="3.5"/>
+<circle class="badge-gray" cx="32" cy="880" r="9"/>
+<text class="badge-txt" x="32" y="880.5" text-anchor="middle" dominant-baseline="central">13</text>
+<path class="flow" d="M436 914 H666" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="554.0" y="905" text-anchor="middle" dominant-baseline="central">data k, k + 1, … · ts Tₖ, …</text>
+<circle class="dot-chk" cx="554" cy="914" r="3.5"/>
+<circle class="badge-gray" cx="32" cy="914" r="9"/>
+<text class="badge-txt" x="32" y="914.5" text-anchor="middle" dominant-baseline="central">14</text>
+<path class="flow" d="M672 948 H794" marker-end="url(#arrow-flow)"/>
+<text class="lbl halo" x="736.0" y="939" text-anchor="middle" dominant-baseline="central">UDP</text>
+<circle class="badge-gray" cx="32" cy="948" r="9"/>
+<text class="badge-txt" x="32" y="948.5" text-anchor="middle" dominant-baseline="central">15</text>
+<path class="chk" d="M800 982 H88" marker-end="url(#arrow-chk)"/>
+<text class="lbl halo" x="441.0" y="973" text-anchor="middle" dominant-baseline="central">new context tag: 14.2 MHz · still no gap tags</text>
+<circle class="badge-gray" cx="32" cy="982" r="9"/>
+<text class="badge-txt" x="32" y="982.5" text-anchor="middle" dominant-baseline="central">16</text>
+<path class="chk" d="M554 1016 H88" marker-end="url(#arrow-chk)"/>
+<text class="lbl halo" x="318.0" y="1007" text-anchor="middle" dominant-baseline="central">every packet passed the stream rules and validate()</text>
+<circle class="badge-gray" cx="32" cy="1016" r="9"/>
+<text class="badge-txt" x="32" y="1016.5" text-anchor="middle" dominant-baseline="central">17</text>
+<rect class="teal" x="24" y="1046" width="832" height="58" rx="8"/>
+<text class="s teal-t" x="40" y="1064" text-anchor="start" dominant-baseline="central">Checker rules on this run</text>
+<text class="xs teal-s" x="40" y="1084" text-anchor="start" dominant-baseline="central">context first · change indicator only at start and commit · context ts = next data ts · counts continuous (4-bit, separate per type)</text>
+<text class="xs teal-s" x="40" y="1098" text-anchor="start" dominant-baseline="central">data ts step = 360 samples × 640 × 8.138 ns = 1.875 ms, within 1 ps · context fields match the committed registers · ≤ 20 context packets/s</text>
+<path class="ctl" d="M24 1150 h28" marker-end="url(#arrow-ctl)"/>
+<text class="note" x="60" y="1150" text-anchor="start" dominant-baseline="central">control: register writes, commits</text>
+<path class="flow" d="M274 1150 h28" marker-end="url(#arrow-flow)"/>
+<text class="note" x="310" y="1150" text-anchor="start" dominant-baseline="central">data: samples, packets, UDP</text>
+<path class="chk" d="M494 1150 h28" marker-end="url(#arrow-chk)"/>
+<text class="note" x="530" y="1150" text-anchor="start" dominant-baseline="central">results back to the test</text>
+<circle class="dot-chk" cx="704" cy="1150" r="3.5"/>
+<text class="note" x="714" y="1150" text-anchor="start" dominant-baseline="central">also seen by the checker</text>
+</svg>
