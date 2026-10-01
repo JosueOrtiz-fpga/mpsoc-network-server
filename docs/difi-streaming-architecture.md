@@ -81,7 +81,7 @@ The **kernel UDP/IP stack**, the `macb` driver on GEM2, and the KSZ9131 PHY put 
 
 ### Host
 
-`gr-difi`'s DIFI Source block listens on a UDP port, parses data and context packets, outputs a `complex64` stream, and emits stream tags on context changes and on missed packets. Downstream is an ordinary GNU Radio flowgraph: a waterfall, filters, and demodulators. An optional SigMF file sink produces recordings that inspectrum, SDRangel and GNU Radio can open. LNXPC should raise `net.core.rmem_max` and the source block's socket buffer, because the board's ring drains in bursts after scheduling hiccups.
+`gr-difi`'s DIFI Source block listens on a UDP port, parses data and context packets, outputs a `complex64` stream, and emits stream tags on context changes and on missed packets. Downstream is an ordinary GNU Radio flowgraph: a waterfall, filters, and demodulators. An optional SigMF file sink produces recordings that inspectrum, SDRangel and GNU Radio can open. LNXPC should raise `net.core.rmem_max`, because the board's ring drains in bursts after scheduling hiccups. At the pinned commit the source block always asks for a 2 MB socket buffer and has no setting for it, and the kernel silently caps the request at `rmem_max` (212,992 B by default on Ubuntu 22.04).
 
 ### Throughput
 
@@ -462,7 +462,7 @@ Full hardware offload would need a UDP/IP stack and MAC in the PL plus a second 
 **Risks.**
 
 - **DIFI details:** Field values come from the Consortium's condensed v1.2.1 reference and its tooling, which disagree in places (see [Oracle caveats](#oracle-caveats)). All disagreements that affect this design are settled by independent sources.
-- **Receiver strictness:** `gr-difi` targets DIFI 1.0 and by default raises errors on context packets it considers non-compliant. The receiver pre-check settles this before RTL; the interoperability test confirms it on hardware.
+- **Receiver strictness:** `gr-difi` targets DIFI 1.0 and by default raises errors on context packets it considers non-compliant. The receiver pre-check settled this before RTL (M1): `gr-difi` accepts the stream and tags every context field correctly, but reads samples byte-swapped (see [Oracle caveats](#oracle-caveats)). The interoperability test confirms it on hardware.
 - **CDC:** The five synchronizers listed under [Principles](#principles) are the only multi-clock logic and deserve dedicated simulation.
 - **Context consistency:** The driver, not the PL, must keep every context value and `TS_PIPE_DELAY_PS` consistent with the signal chain registers (see [Context field values](#context-field-values-0x180)).
 - **Timebase drift:** Without rate steering, the timebase drifts at the oscillator's error. Steering depends on the driver's control loop running reliably.
@@ -471,7 +471,7 @@ Full hardware offload would need a UDP/IP stack and MAC in the PL plus a second 
 
 ## Verification plan
 
-**Receiver pre-check** (before RTL): packets from the Python reference model, sent over UDP on LNXPC, feed a headless `gr-difi` flowgraph, which must accept them without errors and produce the expected tone. This settles the receiver strictness risk before any hardware exists.
+**Receiver pre-check** (before RTL, `make ref-rx-check`): packets from the Python reference model, sent over UDP on LNXPC in real time, feed a headless `gr-difi` flowgraph, which must accept them without errors, output every sample bit-exactly, tag each context packet with its fields, and produce the expected tone. This settles the receiver strictness risk before any hardware exists.
 
 **RTL simulation** (`hw/sim/`, cocotb) covers nine areas:
 
@@ -505,6 +505,7 @@ The Consortium's tooling is the best available oracle, but it is not the spec. K
 - **What the validator does not check.** `certify_source.py` accepts either CIF0 value on any context packet, and does not check change-indicator placement, context timestamps against data timestamps, context rate or integer-hertz fields. Our checker must.
 - **Reference captures.** The three captures carry a value in the Gain word and 0 in Reference Level, consistent with pre-1.2.1 usage. They also set the change indicator on every context packet and send version packets as type `0x5`. Use them for parser tests, not as a template for our field values.
 - **Wireshark test capture.** `wireshark-dissector/tests/difi-gnuradio-example.pcapng` comes from a pre-standard `gr-difi` (OUI `0x7C386C`) and is not a valid DIFI reference.
+- **`gr-difi` sample byte order.** At commit `330dd7f`, `gr-difi` parses headers and context fields in network byte order but copies 16-bit samples in its host's order, so on x86-64 (and AArch64) it reads a spec-compliant stream's samples byte-swapped and the spectrum is garbage. Its sink has the same bug, so `gr-difi` talking to itself hides it. Reported upstream as [gr-difi#19](https://github.com/DIFI-Consortium/gr-difi/issues/19), open. Our stream stays big-endian, as DIFI, the oracle and `certify_source.py` require; `gr-difi` is used unmodified, and the replay into it swaps the samples on the way in (`difi_ref.replay.gr_difi_payload`), never in a capture.
 
 ---
 
@@ -587,6 +588,7 @@ GPS time as the integer-seconds timestamp (TSI GPS). The PL's part is small: the
 - [x] DIFI 1.3.x: no action; the stream is already a valid v1.3.0 Basic Data Plane.
 - [x] UIO + `udmabuf` for register and packetizer bring-up; kernel driver before `test_difi_stream` (see [Driver](#driver)).
 - [ ] Wire the interrupt to `pl_ps_irq0` (same fix as `axi_iic_0`).
+- [ ] Before R4's tone check, decide how the live stream into `gr-difi` compensates for [gr-difi#19](#oracle-caveats): a relay on LNXPC that applies `gr_difi_payload`, or a byte swap after the source block. The board's stream stays DIFI either way. R2's replay and R3's ramp check (missed-packet tags only) are unaffected.
 
 ---
 

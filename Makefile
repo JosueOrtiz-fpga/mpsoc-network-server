@@ -7,7 +7,7 @@ HW_MAKE := $(MAKE) --no-print-directory -C hw
 
 .PHONY: help \
         hw-lint hw-sim hw-project hw-bit hw-xsa hw-plpkg hw-wrapper hw-clean \
-        platform platform-check sw-image sw-sdk sw-lock sw-shell hil hil-stage jtag-boot ref-test release clean
+        platform platform-check sw-image sw-sdk sw-lock sw-shell hil hil-stage jtag-boot ref-test ref-rx-check ref-listen release clean
 
 help:
 	@echo "Hardware (implemented):"
@@ -30,6 +30,8 @@ help:
 	@echo ""
 	@echo "DIFI reference model (sw/apps/difi-ref, host only):"
 	@echo "  make ref-test     Run the difi-ref tests against the DIFI-Certification oracle (PYTEST_ARGS=...)"
+	@echo "  make ref-rx-check Receiver pre-check: the model's stream over UDP into gr-difi (PYTEST_ARGS=...)"
+	@echo "  make ref-listen   Hear the model's tone through gr-difi (LISTEN_ARGS=-h for the options)"
 	@echo ""
 	@echo "Release:"
 	@echo "  make release      Clean checkout on a v* tag: full build + HIL in a worktree -> /srv/releases/<tag>"
@@ -91,6 +93,21 @@ ref-test:
 	@test -f $(ORACLE_DIR)/certify_source.py \
 	  || { echo "ref-test: $(ORACLE_DIR) is empty: run git submodule update --init"; exit 1; }
 	$(PYTEST) sw/apps/difi-ref $(PYTEST_ARGS)
+
+# The receiver pre-check needs GNU Radio and gr-difi at GR_DIFI_COMMIT, which
+# setup-host.sh builds into GR_DIFI_PREFIX; only its Python module needs a path.
+GR_DIFI_COMMIT := $(shell sed -n 's/^GR_DIFI_COMMIT=//p' versions.env)
+GR_DIFI_PREFIX ?= /opt/gr-difi-$(GR_DIFI_COMMIT)
+GR_DIFI_ENV := PYTHONPATH=$(GR_DIFI_PREFIX)/python
+GR_DIFI_FOUND = @$(GR_DIFI_ENV) python3 -c 'import difi' 2>/dev/null \
+	  || { echo "$@: no gr-difi in $(GR_DIFI_PREFIX): run tests/hil/scripts/setup-host.sh"; exit 1; }
+ref-rx-check:
+	$(GR_DIFI_FOUND)
+	$(GR_DIFI_ENV) $(PYTEST) sw/apps/difi-ref --rx $(PYTEST_ARGS)
+
+ref-listen:
+	$(GR_DIFI_FOUND)
+	cd sw/apps/difi-ref && $(GR_DIFI_ENV) python3 -m difi_rx $(LISTEN_ARGS)
 
 # ---- Release (ci/release.sh) -------------------------------------------------
 # Refuses local changes, untracked files and a HEAD without its v* tag; builds the

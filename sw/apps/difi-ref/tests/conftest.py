@@ -16,6 +16,20 @@ TONE_HZ = 12_000
 NUM_DATA = 1100             # crosses two periodic context packets (533, 1066) and a seconds rollover
 
 
+def pytest_addoption(parser):
+    parser.addoption("--rx", action="store_true",
+                     help="run only the receiver pre-check (marker rx; needs GNU Radio and gr-difi)")
+
+
+def pytest_collection_modifyitems(config, items):
+    # rx tests run only with --rx (make ref-rx-check), whatever -m PYTEST_ARGS passes.
+    rx = config.getoption("--rx")
+    keep = [i for i in items if bool(i.get_closest_marker("rx")) == rx]
+    if len(keep) != len(items):
+        config.hook.pytest_deselected(items=[i for i in items if i not in keep])
+        items[:] = keep
+
+
 def assert_same(got, expected):
     """Compare long sequences, reporting only the first difference.
 

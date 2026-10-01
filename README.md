@@ -103,7 +103,7 @@ zub1cg-project/
 │   ├── meta-zub1cg/               # BSP layer
 │   ├── meta-zub1cg-app/           # .gitkeep: product layer, created with its first recipe
 │   └── apps/
-│       └── difi-ref/              # DIFI reference model, host-side Python (make ref-test)
+│       └── difi-ref/              # DIFI reference model, host-side Python (make ref-test, ref-rx-check)
 ├── tests/hil/                     # HIL suite (make hil)
 │   ├── test_*.py, conftest.py     # Tests and the session fixture that boots the board
 │   ├── harness/                   # Console, JTAG boot, SSH access
@@ -166,6 +166,7 @@ Build container. Yocto builds run in the kas 5.4 container on Debian 12 (KAS_CON
 - Submodules: clone with `--recurse-submodules`, or run `git submodule update --init` in an existing checkout (`third_party/DIFI-Certification`, for `make ref-test`)
 - Python packages from apt (pip is not used): `tests/hil/scripts/setup-host.sh` installs pytest, Construct, numpy, scapy, matplotlib and PyYAML
 - Verilator `VERILATOR_VERSION` (`versions.env`) for `make hw-lint` and the cocotb testbenches; `tests/hil/scripts/setup-host.sh` builds it into `/opt/verilator-<version>` (Ubuntu 22.04's package is 4.x)
+- GNU Radio 3.10 from apt and `gr-difi` at `GR_DIFI_COMMIT` (`versions.env`) for `make ref-rx-check`; `tests/hil/scripts/setup-host.sh` builds `gr-difi` unmodified into `/opt/gr-difi-<commit>`
 - KAS scripts: ```git clone --branch 5.4 https://github.com/siemens/kas.git ~/.local/src/kas; sudo ln -s ~/.local/src/kas/kas-container /usr/local/bin/kas-container``` 
 - Docker ```curl -fsSL https://get.docker.com | sh; sudo usermod -aG docker $USER; newgrp docker```
 
@@ -224,6 +225,8 @@ make hil-stage       # stage out/sw and the PL package for netboot (PL_STEM=<ste
 make jtag-boot       # boot the staged build over JTAG, console by hand
 make hil             # hil-stage + JTAG boot + pytest suite; logs in out/hil/<id>/<time>/
 make ref-test        # DIFI reference model tests (host only, no board)
+make ref-rx-check    # receiver pre-check: the model's stream over UDP into gr-difi
+make ref-listen      # hear the model's tone through gr-difi (LISTEN_ARGS=-h for the options)
 make release         # on a v* tag, clean tree: full build + HIL → /srv/releases/<tag>/
 ```
 

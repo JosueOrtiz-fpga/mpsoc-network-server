@@ -33,8 +33,16 @@ Panel 1 is the pre-check setup. Panel 2 follows one `make ref-rx-check` run step
 
 ## Findings before starting
 
-- **`gr-difi`'s receive checks are narrow.** At commit `330dd7f`, its source block (`lib/difi_source_cpp_impl.cc`) rejects only a context packet that is not 108 B (or 72 B), a payload-format bit depth that differs from its configured depth, and, as a warning, gaps in the data packet count. It does not check class ID, OUI, CIF0 or timestamps. The [field values](difi-streaming-architecture.md#field-values) satisfy all three checks, so the pre-check is expected to pass on the first run. It reads Reference Level from bits 15:0, which agrees with the spec reading in [Oracle caveats](difi-streaming-architecture.md#oracle-caveats).
-- **Everything installs from apt on Ubuntu 22.04.** GNU Radio 3.10.1 with `gnuradio-dev`, `pybind11-dev`, `liborc-0.4-dev`, and `python3-construct` (2.10.67), `python3-numpy`, `python3-scapy`, `python3-yaml`. `gr-difi` is built from source, pinned to `330dd7f`. pip is not installed on LNXPC.
+- **`gr-difi`'s receive checks are narrow.** At commit `330dd7f`, its source block (`lib/difi_source_cpp_impl.cc`) rejects only a context packet that is not 108 B (or 72 B), a payload-format bit depth that differs from its configured depth, and, as a warning, gaps in the data packet count. It does not check class ID, OUI, CIF0 or timestamps. The [field values](difi-streaming-architecture.md#field-values) satisfy all three checks, and the stream was accepted on the first run. It reads Reference Level from bits 15:0, which agrees with the spec reading in [Oracle caveats](difi-streaming-architecture.md#oracle-caveats).
+- **`gr-difi` reads samples byte-swapped.** It converts headers and context fields from network byte order but copies samples in the host's order, so on LNXPC every sample of a spec-compliant stream comes out byte-swapped: the +12 kHz tone appeared at −36 kHz with spurs 1.7 dB below it. This is [gr-difi#19](https://github.com/DIFI-Consortium/gr-difi/issues/19), open upstream. Found in iteration 2; see the [design choice](#design-choices) on how the pre-check compensates.
+- **Other `gr-difi` behaviour the pre-check relies on.** Found in iteration 2, at `330dd7f`:
+  - Samples come out as raw int16 values in `complex64`, not scaled to ±1.
+  - Packets with a stream ID other than the configured one are dropped with a warning. The block's default stream ID is 80000.
+  - A `pck_n` tag marks the first data packet as well as every gap.
+  - Each `context` tag sits on the first sample of the next data packet.
+  - The block never ends its stream, so a run ends with `stop()`.
+  - GNU Radio 3.10.1's `pmt.to_python` cannot convert the context tag, because its `raw` field is an s8vector; `difi_rx` converts the tag itself.
+- **Everything else installs from apt on Ubuntu 22.04.** GNU Radio 3.10.1 with `gnuradio-dev`, `pybind11-dev`, `liborc-0.4-dev`, and `python3-construct` (2.10.67), `python3-numpy`, `python3-scapy`, `python3-yaml`. pip is not installed on LNXPC. `gr-difi` is built unmodified from `330dd7f` (`GR_DIFI_COMMIT`) into `/opt/gr-difi-330dd7f` by `setup-host.sh`. It needs `GR_PYTHON_DIR`, because the Ubuntu default puts its module under `local/lib/python3.10/dist-packages`, and an `RPATH` to its library, so that `PYTHONPATH` is the only setting `make ref-rx-check` needs.
 - **`certify_source.py` reports, it does not fail.** At `6ee49d1e` it exits 0 even when the capture fails; the verdict is its `Overall Result` line (and `overall_result` in its summary YAML). Data packets that arrive before the first context packet are skipped without being counted, so a test must also compare its compliant counts with the packets generated. It writes its error log, summary and plots into the working directory. Found in iteration 1; `tests/test_certify.py` handles all three.
 - **`make release` breaks once the submodule exists.** `git worktree add` does not initialize submodules, so `ci/release.sh` needs `git submodule update --init` in the worktree.
 
@@ -43,6 +51,7 @@ Panel 1 is the pre-check setup. Panel 2 follows one `make ref-rx-check` run step
 - **The `difi_ref` core uses only the Python standard library.** Construct is needed only by the `validate()` tests and numpy only by the pre-check's FFT. The core then runs unchanged under the system Python, GNU Radio's Python and R1's cocotb environment, and R2's board-side `difi-uio` can reuse its pcap writer.
 - **Dependencies come from apt for now.** R1 probably needs a venv, because cocotb is not packaged for 22.04; a standard-library core makes that move trivial.
 - **M1's tone is an ideal complex tone at the output rate.** The bit-exact test source and DDC model belong to R4.
+- **`gr-difi` is used unmodified; the sender compensates for its byte-order bug.** `difi_ref.replay.gr_difi_payload` swaps each data packet's samples to little-endian just before the datagram is sent, and leaves the prologue and context packets alone. Everything else stays DIFI: the packetizer, every capture and every oracle check use big-endian samples. The compensation is opt-in (`replay(transform=...)`, `python3 -m difi_ref --udp ... --gr-difi`), so it can never reach a pcap. `test_gr_difi_issue_19_still_present` fails once a newer `gr-difi` fixes the bug, and the compensation goes then. The alternative, patching `gr-difi`, would leave anyone with a stock build seeing a wrong spectrum. The live stream from the board (R3 onward) cannot pass through this replay; that choice is an [open item](difi-streaming-architecture.md#open-decisions-and-todo) for R4.
 
 ## Work items
 
@@ -130,7 +139,24 @@ Only two of the ten faults are visible to the DIFI-Certification tools. The mode
 - **pytest 6 stalls on long failing comparisons.** A failed `assert` on two 1,100-element lists made pytest diff them with `difflib` for 252 s before failing with a `RecursionError`, so a regression would have looked like a hang. Long sequences are now compared with `assert_same` in `tests/conftest.py`, which reports only the first difference.
 - **A test line that could not fail.** One check compared a call's result with the same call. It was replaced with a real continuity check at sample index 10¹².
 
-**Next time.** Repeat these checks at the end of each iteration for the code that iteration adds: the checker in 3, commits in 4, the timebase and overflow in 5. Keep the table above current.
+**Results at iteration 2.** The same method, with both `make ref-test` and `make ref-rx-check` run for each mutant, on the replay, the receiver and the packet fields `gr-difi` depends on. Every mutant was caught:
+
+| Mutant | Edit | Failing tests |
+|---|---|---|
+| No pacing | `replay.py`: never sleep | `test_paced_by_timestamps`, `test_late_packets_counted` (`ref-test` only) |
+| Twice the real rate | `replay.py`: due times halved | `test_paced_by_timestamps`, `test_late_packets_counted` (`ref-test` only) |
+| One data packet dropped | `replay.py`: skip the 101st datagram | every rx test except the tone: bit-exact samples, gap tag, context tag positions |
+| No `gr-difi` compensation | `replay.py`: `gr_difi_payload` returns its input | `test_gr_difi_payload_swaps_only_data_samples`; rx bit-exact samples and tone, both streams |
+| Compensation swaps the prologue too | `replay.py`: swap from byte 0 | `test_gr_difi_payload_swaps_only_data_samples`; all eight rx tests on both streams |
+| Receiver expects another stream ID | `receiver.py`: `stream_id + 1` | all nine rx tests (no samples arrive) |
+| Context packet 4 bytes short | `packetizer.py`: body truncated | six `ref-test` tests, oracle included; all nine rx tests (`gr-difi` raises) |
+| 8-bit payload format in context | `packetizer.py`: `payload_format_words(8)` | `test_oracle_reads_back_context_fields`, `test_words_the_oracle_reads_differently`; all nine rx tests (`gr-difi` raises) |
+| RF frequency 1 Hz high in context | `packetizer.py`: `ctx_rf_ref_freq_hz + 1` | `test_generated_capture_passes`, `test_oracle_reads_back_context_fields`; `test_context_tags_carry_the_configured_fields`, both streams |
+| Tone sign flipped | `sources.py`: Q negated | the source tests; rx `test_tone_at_its_frequency`, both streams |
+
+Two results shape the suite. On an idle host, `gr-difi` over loopback accepted an unpaced burst of 1,100 packets: its socket buffer (425,984 B, twice the default `rmem_max`) holds about 185 datagrams, 0.35 s of stream at 192 kS/s, and it drains faster than the burst arrives. A busier host or a longer stall would drop packets, but the rx tests cannot rely on that, so pacing is covered by the replay's unit tests, with a fake clock. The bit-exact comparison cannot see an error in the source itself, because it compares with the same source; the FFT check can, which is why both are kept.
+
+**Next time.** Repeat these checks at the end of each iteration for the code that iteration adds: the checker in 3, commits in 4, the timebase and overflow in 5. Keep the tables above current.
 
 ## Out of scope
 

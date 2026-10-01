@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests/hil/scripts/setup-host.sh - one-time host setup for the HIL bench
 # (JTAG boot + TFTP/NFS netboot) and the host tools make release needs beyond Vivado
-# and kas (Verilator). Safe to re-run: every step is idempotent.
+# and kas (Verilator), plus GNU Radio and gr-difi for make ref-rx-check. Safe to re-run:
+# every step is idempotent.
 #
 # Usage: tests/hil/scripts/setup-host.sh [--check]
 #   (no args)  do the setup, then run the checks
@@ -26,6 +27,7 @@ user=${USER:-$(id -un)}
 helper=/usr/local/sbin/hil-rootfs
 sudo_rule=/etc/sudoers.d/zub1cg-hil
 verilator_prefix=/opt/verilator-$VERILATOR_VERSION
+gr_difi_prefix=/opt/gr-difi-$GR_DIFI_COMMIT
 
 die()  { echo "setup-host: ERROR: $*" >&2; exit 1; }
 say()  { echo "setup-host: $*"; }
@@ -51,7 +53,7 @@ setup() {
   [ "$HIL_NETMASK" = 255.255.255.0 ] || die "this script assumes a /24 (HIL_NETMASK=255.255.255.0)"
   sudo -v   # ask for the sudo password once, up front
 
-  step "1/11 Static address $HIL_HOST_IP/24 on $HIL_NIC (NetworkManager profile 'hil')"
+  step "1/12 Static address $HIL_HOST_IP/24 on $HIL_NIC (NetworkManager profile 'hil')"
   # Point-to-point link to the board: static address, no gateway, no IPv6, so it never
   # becomes the default route and never touches the home network. Autoconnects when the
   # cable is plugged in.
@@ -65,7 +67,7 @@ setup() {
   fi
   sudo nmcli con up hil >/dev/null 2>&1 || say "profile will activate once the link comes up (cable + board powered)"
 
-  step "2/11 dnsmasq config: TFTP only, on $HIL_NIC only"
+  step "2/12 dnsmasq config: TFTP only, on $HIL_NIC only"
   # Written before the package is installed, so its first start does not try to serve
   # DNS on port 53 and fail against systemd-resolved (port=0 turns DNS off).
   # bind-dynamic keeps dnsmasq working while the NIC has no address (board off, cable out).
@@ -79,20 +81,22 @@ enable-tftp
 tftp-root=$HIL_SRV
 EOF
 
-  step "3/11 Packages"
+  step "3/12 Packages"
   # dnsmasq + nfs-kernel-server: the TFTP and NFS servers the board boots from.
   # u-boot-tools (mkimage) builds boot.scr, device-tree-compiler (fdtget) checks the DTB,
   # picocom is the serial console for J16, openssh-client logs in to the board,
   # python3-pytest runs the suite in tests/hil (make hil). python3-construct is the DIFI
   # oracle's packet parser (make ref-test); numpy, scapy, matplotlib and yaml are what
-  # DIFI-Certification's certify_source.py imports. The rest builds Verilator (step 4)
-  # and the models it generates.
+  # DIFI-Certification's certify_source.py imports. GNU Radio 3.10.1 runs the receiver
+  # pre-check (make ref-rx-check); its -dev package, pybind11, liborc and cmake build
+  # gr-difi (step 5). The rest builds Verilator (step 4) and the models it generates.
   sudo apt-get install -y dnsmasq nfs-kernel-server u-boot-tools device-tree-compiler picocom \
     openssh-client python3-pytest \
     python3-construct python3-numpy python3-scapy python3-matplotlib python3-yaml \
+    gnuradio gnuradio-dev pybind11-dev liborc-0.4-dev cmake \
     git autoconf flex bison help2man g++ make perl python3 libfl2 libfl-dev zlib1g-dev
 
-  step "4/11 Verilator $VERILATOR_VERSION in $verilator_prefix (make hw-lint, cocotb)"
+  step "4/12 Verilator $VERILATOR_VERSION in $verilator_prefix (make hw-lint, cocotb)"
   # Built once from the release tag into a prefix of its own and linked into /usr/local/bin.
   # Bumping VERILATOR_VERSION builds the new release next to the old one and relinks.
   if [ -x "$verilator_prefix/bin/verilator" ]; then
@@ -111,12 +115,34 @@ EOF
     sudo ln -sfn "$verilator_prefix/bin/$t" "/usr/local/bin/$t"
   done
 
-  step "5/11 Served directory $HIL_SRV, release directory $HIL_RELEASES"
+  step "5/12 gr-difi $GR_DIFI_COMMIT in $gr_difi_prefix (make ref-rx-check)"
+  # Built unmodified from the pinned commit into a prefix of its own, outside the system
+  # GNU Radio. Its Python module goes to $gr_difi_prefix/python, which make ref-rx-check
+  # puts on PYTHONPATH; RUNPATH points the module at its library, so nothing else needs
+  # a path. Bumping GR_DIFI_COMMIT builds the new commit next to the old one.
+  if PYTHONPATH="$gr_difi_prefix/python" python3 -c 'import difi' 2>/dev/null; then
+    say "already built, kept"
+  else
+    local src
+    src=$(mktemp -d)
+    say "building (about a minute; log: $src.log)"
+    ( git clone -q https://github.com/DIFI-Consortium/gr-difi.git "$src" \
+        && git -C "$src" checkout -q "$GR_DIFI_COMMIT" \
+        && cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_INSTALL_PREFIX="$gr_difi_prefix" -DGR_PYTHON_DIR="$gr_difi_prefix/python" \
+             -DCMAKE_INSTALL_RPATH="$gr_difi_prefix/lib/$(gcc -print-multiarch)" \
+        && make -C "$src/build" -j"$(nproc)"
+    ) > "$src.log" 2>&1 || die "gr-difi build failed, see $src.log (sources kept in $src)"
+    sudo make -C "$src/build" install >> "$src.log" 2>&1 || die "gr-difi install failed, see $src.log"
+    sudo rm -rf "$src" "$src.log"
+  fi
+
+  step "6/12 Served directory $HIL_SRV, release directory $HIL_RELEASES"
   # Owned by you, so staging a build only needs root for the rootfs (through hil-rootfs),
   # and make release writes its artifacts without sudo.
   sudo install -d -o "$user" -g "$(id -gn)" "$HIL_SRV" "$HIL_RELEASES"
 
-  step "6/11 $HIL_SRV mounted nosuid,nodev (bind mount onto itself)"
+  step "7/12 $HIL_SRV mounted nosuid,nodev (bind mount onto itself)"
   # hil-rootfs extracts rootfs tarballs as root without a password. Set-uid files in a
   # staged rootfs must work on the board (its sudo is one) but never on this host.
   # The NFS client mounts with its own options, so the board is unaffected.
@@ -126,7 +152,7 @@ EOF
   fi
   findmnt -n "$HIL_SRV" >/dev/null || sudo mount "$HIL_SRV"
 
-  step "7/11 NFS export to the board only"
+  step "8/12 NFS export to the board only"
   # no_root_squash: the rootfs is owned by root. Limited to the board's address.
   # /etc/exports.d does not exist on a fresh Ubuntu 22.04.
   sudo mkdir -p /etc/exports.d
@@ -134,7 +160,7 @@ EOF
     | sudo tee /etc/exports.d/hil.exports >/dev/null
   sudo exportfs -ra
 
-  step "8/11 Enable and (re)start the services"
+  step "9/12 Enable and (re)start the services"
   sudo systemctl enable dnsmasq >/dev/null 2>&1 || true
   sudo systemctl enable --now nfs-server
   sudo systemctl restart dnsmasq || {
@@ -142,11 +168,11 @@ EOF
     die "dnsmasq failed to start (see the log above)"
   }
 
-  step "9/11 Serial console access"
+  step "10/12 Serial console access"
   # The J16 UART belongs to the dialout group. Takes effect at the next login.
   sudo usermod -aG dialout "$user"
 
-  step "10/11 Test login key $HIL_SSH_KEY"
+  step "11/12 Test login key $HIL_SSH_KEY"
   # Only the public half goes into staged rootfs trees; the private key stays here.
   install -d -m 0700 "$(dirname "$HIL_SSH_KEY")"
   if [ -f "$HIL_SSH_KEY" ]; then
@@ -155,7 +181,7 @@ EOF
     ssh-keygen -q -t ed25519 -N '' -C "zub1cg-hil@$(hostname)" -f "$HIL_SSH_KEY"
   fi
 
-  step "11/11 Staging helper $helper and its sudo rule"
+  step "12/12 Staging helper $helper and its sudo rule"
   # Root-owned copy with the served directory filled in; the rule allows this one path
   # without a password, so make hil-stage (and make hil) run unattended.
   local tmp
@@ -221,7 +247,7 @@ verify() {
   for t in mkimage fdtget picocom ssh; do
     command -v "$t" >/dev/null && ok "$t found" || warn "$t not found (setup step 3)"
   done
-  for t in pytest construct numpy scapy matplotlib yaml; do
+  for t in pytest construct numpy scapy matplotlib yaml gnuradio; do
     if python3 -c "import $t" 2>/dev/null; then ok "python3 module $t found"
     else warn "python3 module $t not found (setup step 3)"; fi
   done
@@ -231,6 +257,8 @@ verify() {
   out=$(verilator --version 2>/dev/null || true)
   if [[ $out == "Verilator $VERILATOR_VERSION "* ]]; then ok "verilator $VERILATOR_VERSION"
   else warn "verilator is '${out:-missing}', versions.env pins $VERILATOR_VERSION (setup step 4)"; fi
+  if PYTHONPATH="$gr_difi_prefix/python" python3 -c 'import difi' 2>/dev/null; then ok "gr-difi $GR_DIFI_COMMIT in $gr_difi_prefix"
+  else warn "gr-difi $GR_DIFI_COMMIT does not import from $gr_difi_prefix/python (setup step 5)"; fi
 
   # JTAG cable and console.
   if compgen -G "/etc/udev/rules.d/52-xilinx-ftdi-usb.rules" >/dev/null \
