@@ -4,12 +4,14 @@ Values follow Field values in docs/difi-streaming-architecture.md. Where the
 DIFI-Certification Construct definitions disagree with the spec (Reference Level in
 bits 15:0, State and Event layout), the spec wins; see Oracle caveats there.
 """
+import struct
 from fractions import Fraction
 
 PS_PER_S = 10**12
 
 PKT_TYPE_DATA = 0x1
 PKT_TYPE_CONTEXT = 0x4
+PKT_TYPE_VERSION = 0x5          # Version and Extension Context: only in the reference captures
 TSI_POSIX = 3
 TSF_REAL_TIME = 2
 
@@ -20,6 +22,15 @@ PACKET_CLASS_CONTEXT = 0x0001   # Standard Flow Signal Context
 
 PROLOGUE_WORDS = 7              # header, stream ID, class ID (2), integer and fractional timestamp (1 + 2)
 CONTEXT_WORDS = 27
+
+# Header, stream ID, class ID (2 words), integer timestamp, fractional timestamp.
+PROLOGUE = struct.Struct(">IIIIIQ")
+# The context body for CIF0: CIF0, reference point, bandwidth, IF reference frequency,
+# RF reference frequency, IF band offset, reference level, gain, sample rate, timestamp
+# adjustment, timestamp calibration time, State and Event, payload format (2 words).
+CONTEXT_BODY = struct.Struct(">IIQQQQIIQqIIII")
+assert PROLOGUE.size == 4 * PROLOGUE_WORDS
+assert PROLOGUE.size + CONTEXT_BODY.size == 4 * CONTEXT_WORDS
 
 CHANGE_INDICATOR = 1 << 31      # CIF0 bit 31
 CIF0 = 0x7BB98000               # the field set this build emits, change indicator clear

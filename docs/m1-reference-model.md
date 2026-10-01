@@ -44,6 +44,8 @@ Panel 1 is the pre-check setup. Panel 2 follows one `make ref-rx-check` run step
   - GNU Radio 3.10.1's `pmt.to_python` cannot convert the context tag, because its `raw` field is an s8vector; `difi_rx` converts the tag itself.
 - **Everything else installs from apt on Ubuntu 22.04.** GNU Radio 3.10.1 with `gnuradio-dev`, `pybind11-dev`, `liborc-0.4-dev`, and `python3-construct` (2.10.67), `python3-numpy`, `python3-scapy`, `python3-yaml`. pip is not installed on LNXPC. `gr-difi` is built unmodified from `330dd7f` (`GR_DIFI_COMMIT`) into `/opt/gr-difi-330dd7f` by `setup-host.sh`. It needs `GR_PYTHON_DIR`, because the Ubuntu default puts its module under `local/lib/python3.10/dist-packages`, and an `RPATH` to its library, so that `PYTHONPATH` is the only setting `make ref-rx-check` needs.
 - **`certify_source.py` reports, it does not fail.** At `6ee49d1e` it exits 0 even when the capture fails; the verdict is its `Overall Result` line (and `overall_result` in its summary YAML). Data packets that arrive before the first context packet are skipped without being counted, so a test must also compare its compliant counts with the packets generated. It writes its error log, summary and plots into the working directory. Found in iteration 1; `tests/test_certify.py` handles all three.
+- **The reference captures are filtered extracts, in classic pcap.** Despite their `.pcapng` names, all three are classic pcap (Ethernet, microsecond timestamps). Each holds 100 data packets, then 10 context packets about 100 ms apart with 2 version packets among them. No data packet follows a context packet, so the rules between the two cannot be checked on them, and `certify_source.py`, which skips data packets before the first context packet, checks none of their data packets: its own README example reports `PASS` with `compliant_data_count: 0`. Example 1's timestamps are quantized to about 1 µs, and Example 3 is missing 6 data packets before packet 51 (count and timestamp both jump by 7). They were added to DIFI-Certification as "v1.1 example pcaps" (PR #41), which explains their pre-1.2.1 habits. The submodule's only real pcapng is the Wireshark dissector's test capture, from a pre-standard `gr-difi`, which serves as a pcapng parser test only. Found in iteration 3.
+- **The standard-library rule was enforced on the package's `__init__` only.** `test_core_imports_only_stdlib` imported `difi_ref`, whose `__init__` imports nothing, so a submodule could have imported numpy unnoticed. It now imports every module. Found in iteration 3.
 - **`make release` breaks once the submodule exists.** `git worktree add` does not initialize submodules, so `ci/release.sh` needs `git submodule update --init` in the worktree.
 
 ## Design choices
@@ -51,6 +53,8 @@ Panel 1 is the pre-check setup. Panel 2 follows one `make ref-rx-check` run step
 - **The `difi_ref` core uses only the Python standard library.** Construct is needed only by the `validate()` tests and numpy only by the pre-check's FFT. The core then runs unchanged under the system Python, GNU Radio's Python and R1's cocotb environment, and R2's board-side `difi-uio` can reuse its pcap writer.
 - **Dependencies come from apt for now.** R1 probably needs a venv, because cocotb is not packaged for 22.04; a standard-library core makes that move trivial.
 - **M1's tone is an ideal complex tone at the output rate.** The bit-exact test source and DDC model belong to R4.
+- **The checker reads the stream's own context.** The packet period comes from the sample rate and payload format of the context packet in force, so the checker needs no settings; iteration 4 adds the committed registers as expectations. A context packet that fails its own checks (CIF0, frequencies, payload format) does not change how later data is read, so one bad field is one finding rather than one per data packet. A data packet's sample index comes from its timestamp rather than from counting samples, so the source comparison realigns after a drop or a duplicate, and a `samples` finding means the samples disagree with the time the packet claims. Timestamp steps may differ from the packet period by 1 ps, the rounding of the Q32.32 timebase.
+- **Lenient mode checks context packets in full and data packets' prologues only.** The reference captures carry no data after a context packet and have quantized or gapped timestamps, so data counts, timing, sizes and samples are left to strict mode, which the generated streams and the mutation tests exercise. Version packets are skipped; the Gain word, 8- to 16-bit samples and the change indicator on every context packet are accepted. A rule a mode skips, or that never applied, is reported as not checked, never as passed.
 - **`gr-difi` is used unmodified; the sender compensates for its byte-order bug.** `difi_ref.replay.gr_difi_payload` swaps each data packet's samples to little-endian just before the datagram is sent, and leaves the prologue and context packets alone. Everything else stays DIFI: the packetizer, every capture and every oracle check use big-endian samples. The compensation is opt-in (`replay(transform=...)`, `python3 -m difi_ref --udp ... --gr-difi`), so it can never reach a pcap. `test_gr_difi_issue_19_still_present` fails once a newer `gr-difi` fixes the bug, and the compensation goes then. The alternative, patching `gr-difi`, would leave anyone with a stock build seeing a wrong spectrum. The live stream from the board (R3 onward) cannot pass through this replay; that choice is an [open item](difi-streaming-architecture.md#open-decisions-and-todo) for R4.
 
 ## Work items
@@ -81,9 +85,11 @@ M1 is built as a series of working versions rather than item by item. Each itera
 | 3 | **Stream checker, first cut.** Context first, change-indicator placement, count continuity, timestamp step, each context timestamp equal to the next data timestamp, with mutation tests for each; counter-ramp source; pcap and pcapng reader; lenient mode for the reference captures. | 3, 5, 6 (parts) | The checker passes the generated stream, flags every mutation, and parses the three reference captures | 5–7 h |
 | 4 | **Register set and commits.** The register set and commit validation replace the fixed configuration; commit at a packet boundary; `FORCE_CONTEXT`; context fields checked against the committed registers. | 2; 3, 6 (parts) | Every commit error code is provoked, and the pre-check's second run sees the retune as a context tag | 3–4 h |
 | 5 | **Timebase and overflow.** Q32.32 timebase with `LOAD_NOW`, `LOAD_INC` and rollover; `TS_PIPE_DELAY_PS` and its borrow from integer seconds; overflow drops and resume; zeros source. The picosecond rounding rule and the latch offset `c` go into the architecture document. | 3, 6 (rest) | The checker passes streams across a seconds rollover, through overflow, and with a non-zero pipeline delay; R2's timestamp rules are recorded | 5–7 h |
-| 6 | **Finish.** VLAN tags; raw DMA dump format; `ref-test` in `make release` with the submodule step; README for `difi-ref`; architecture updates. | 5, 7 (rest) | The [exit criteria](#exit-criteria) | 3–4 h |
+| 6 | **Finish.** Raw DMA dump format; `ref-test` in `make release` with the submodule step; README for `difi-ref`; architecture updates. | 5, 7 (rest) | The [exit criteria](#exit-criteria) | 3–4 h |
 
 The total, 25–35 h, is about the same as the work items' total. Iterations 4 and 5 replace a stand-in behind an interface that iteration 1 already defines, so little is rewritten.
+
+**Iteration 3 as built** differs from its row in four ways. The per-packet checks of work item 6 (prologue constants, CIF0, reference point, whole-hertz frequencies, Reference Level and Gain words, payload format, sizes) came in with the decoder, which reads those fields anyway. Gaps are sized from timestamps now, since Example 3 has one; overflow and its ramp gaps stay in iteration 5. The reader strips VLAN tags, which was no more work than refusing them. Lenient mode checks context packets in full and data packets' prologues only (see [Design choices](#design-choices)).
 
 ### Stand-ins and the interfaces they keep
 
@@ -156,7 +162,50 @@ Only two of the ten faults are visible to the DIFI-Certification tools. The mode
 
 Two results shape the suite. On an idle host, `gr-difi` over loopback accepted an unpaced burst of 1,100 packets: its socket buffer (425,984 B, twice the default `rmem_max`) holds about 185 datagrams, 0.35 s of stream at 192 kS/s, and it drains faster than the burst arrives. A busier host or a longer stall would drop packets, but the rx tests cannot rely on that, so pacing is covered by the replay's unit tests, with a fake clock. The bit-exact comparison cannot see an error in the source itself, because it compares with the same source; the FFT check can, which is why both are kept.
 
-**Next time.** Repeat these checks at the end of each iteration for the code that iteration adds: the checker in 3, commits in 4, the timebase and overflow in 5. Keep the tables above current.
+**Results at iteration 3.** Two rounds. First, the model mutants of iterations 1 and 2, judged by the checker alone (strict mode, 1,100 data packets of the tone and of the ramp, each compared with the unmutated source). The DIFI tools saw two of the ten iteration-1 faults; the checker sees eleven of these fourteen:
+
+| Mutant | Checker findings |
+|---|---|
+| No change indicator on the first context packet | `change-indicator` |
+| Context timestamp one packet late | `context-timestamp` |
+| One count for both packet types | `count` |
+| Little-endian payload | `samples` (tone and ramp) |
+| I and Q swapped in the tone | `samples` (tone) |
+| Reference Level in bits 31:16 | `ref-level`, with a non-zero level; at 0 dBm the mutant changes no byte |
+| Floating-point timestamps | none: the error is at most 1 ps, inside the tolerance; `test_data_timestamps_step_by_packet_period` still catches it |
+| Wrong OUI | `class-id` |
+| Every timestamp one second late | none: the checker takes no expected start time |
+| Tone phase restarting each packet | `samples` (tone) |
+| Context packet 4 bytes short | `decode`, `context-first` |
+| 8-bit payload format in context | `payload-format` |
+| RF frequency 1 Hz high in context | none until iteration 4 checks context fields against the registers |
+| Tone sign flipped | `samples` (tone) |
+
+Second, the checker, decoder, reader and ramp broken one line at a time, with `make ref-test` as the judge. Every mutant was caught:
+
+| Mutant | Edit | Failing tests |
+|---|---|---|
+| Step tolerance 2 ps | `checker.py`: `STEP_TOLERANCE_PS = 2` | `test_mutation_strict[timestamp-2ps]` |
+| Count ignores the gap | `checker.py`: expected count without `missing` | `drop-1`, `size-field`, `test_gaps_are_sized_by_timestamps` |
+| A failing context packet sets the format | `checker.py`: `if usable` always true | `8-bit`, `8-bit-first`, `rate-fraction` |
+| Context timestamp compared in seconds only | `checker.py` | `context-timestamp`, `data-first`, strict and lenient |
+| Change indicator never flagged | `checker.py` | `no-change-indicator`, `periodic-change-indicator`, strict on all three captures |
+| Sample index by counting samples | `checker.py`: previous index plus previous size | `duplicate`, `drop-1`, `drop-16`, `17-samples`, `size-field`, `test_gaps_are_sized_by_timestamps` |
+| Lenient mode checks Gain | `checker.py` | lenient on all three captures, `test_lenient_skips_only_its_rules`, `test_cli_reference_capture` |
+| Gaps not listed | `checker.py` | `test_gaps_are_sized_by_timestamps` |
+| Strict mode takes any width | `checker.py`: 4 to 16 bits in both modes | `8-bit`, `8-bit-first`, strict on all three captures |
+| Fractional timestamp unchecked | `checker.py` | `fraction-over-1s`, strict and lenient |
+| No size check in the decoder | `decode.py` | `size-field`, strict and lenient; `test_rejects[size-field]` |
+| VLAN tags not stripped | `pcap.py` | `test_vlan_tags_padding_and_other_frames` |
+| Nanosecond pcap read as microseconds | `pcap.py` | `test_classic_byte_orders_and_resolutions[<]` |
+| pcapng `if_tsresol` ignored | `pcap.py` | `test_pcapng_agrees_with_scapy`, `test_pcapng_sections_resolutions_and_offsets` |
+| UDP length ignored (Ethernet padding kept) | `pcap.py` | `test_vlan_tags_padding_and_other_frames` |
+| pcapng always little-endian | `pcap.py` | `test_pcapng_sections_resolutions_and_offsets` |
+| Ramp Q equal to I | `sources.py` | `test_ramp_values`, `test_ramp_as_unsigned_words`, `test_mutation_strict[i-q-swapped]` |
+
+The checker's own mutation tests (`tests/test_checker.py`, 32 corruptions, each with its exact findings in strict and lenient mode) run in every `make ref-test`, and `test_every_rule_is_provoked` fails if a rule has none.
+
+**Next time.** Repeat these checks at the end of each iteration for the code that iteration adds: commits in 4, the timebase and overflow in 5. Keep the tables above current.
 
 ## Out of scope
 

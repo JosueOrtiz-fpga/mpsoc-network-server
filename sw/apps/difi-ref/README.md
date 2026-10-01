@@ -7,9 +7,11 @@ difi_ref/
   fields.py      # DIFI constants and encoders: headers, class ID, Q44.20 Hz, Q9.7 dBm
   config.py      # StreamConfig: stand-in for the active register set (iteration 4 replaces it)
   timebase.py    # IdealTimebase: stand-in for the Q32.32 timebase (iteration 5)
-  sources.py     # IdealTone: complex int16 tone, phase from the global sample index
+  sources.py     # IdealTone and CounterRamp: complex int16 samples by global sample index
   packetizer.py  # data and context packets; Packetizer emits the stream from ENABLE on
-  pcap.py        # pcap writer with synthetic Ethernet, IPv4 and UDP headers
+  decode.py      # packets back into their fields: the packetizer in reverse
+  checker.py     # stream checker, strict or lenient; python3 -m difi_ref.checker CAPTURE
+  pcap.py        # pcap writer (synthetic Ethernet, IPv4, UDP); pcap and pcapng reader
   replay.py      # UDP replay paced by packet timestamps; gr_difi_payload() for gr-difi#19
   __main__.py    # python3 -m difi_ref out.pcap | --udp HOST:PORT: write or send a generated stream
 difi_rx/         # receiver side: GNU Radio and gr-difi, so kept out of difi_ref
@@ -17,10 +19,11 @@ difi_rx/         # receiver side: GNU Radio and gr-difi, so kept out of difi_ref
   __main__.py    # python3 -m difi_rx: hear the model's tone through gr-difi (make ref-listen)
 tests/           # pytest suite (make ref-test; test_rx.py under make ref-rx-check)
   oracle.py      # adapter for the DIFI-Certification Construct definitions
+  reference_captures.py  # the DIFI-Certification captures the tests read
 pytest.ini
 ```
 
-The model is built up in iterations (see the doc above). Iteration 1 generates the example run's stream, 192 kS/s at 7.1 MHz with a +12 kHz tone: a context packet with the change indicator, then data packets of 360 samples every 1.875 ms, with a periodic context packet about once a second. Every packet passes the oracle's `validate()`, and a generated capture passes `certify_source.py`.
+The model is built up in iterations (see the doc above). Iteration 1 generates the example run's stream, 192 kS/s at 7.1 MHz with a +12 kHz tone: a context packet with the change indicator, then data packets of 360 samples every 1.875 ms, with a periodic context packet about once a second. Every packet passes the oracle's `validate()`, and a generated capture passes `certify_source.py`. Iteration 3 adds the stream checker, the counter ramp and the capture reader (below).
 
 To look at a stream by hand, from `sw/apps/difi-ref`:
 
@@ -30,6 +33,22 @@ python3 -m difi_ref /tmp/difi.pcap --seconds 2          # open in Wireshark, or:
 ```
 
 `certify_source.py` writes a summary, a PSD plot and an error log into its working directory (so not the submodule, or it shows as modified), and exits 0 even on failure: read its `Overall Result` line.
+
+## Stream checker
+
+`difi_ref.checker` checks each packet and the stream rules that the DIFI tools do not: context first, change-indicator placement, separate continuous counts, data timestamps stepping by the packet period (within 1 ps), each context packet carrying the next data packet's timestamp, gaps sized from timestamps, and, given the source, every sample. It takes the packet period from the stream's own context packets, so it needs no settings. `--rules` lists the rules.
+
+```sh
+python3 -m difi_ref /tmp/ramp.pcap --ramp --seconds 3
+python3 -m difi_ref.checker /tmp/ramp.pcap --ramp            # strict; --ramp also checks every sample
+python3 -m difi_ref.checker ../../../third_party/DIFI-Certification/example_pcaps/Example1_1Msps_8bits.pcapng --lenient
+```
+
+It exits 0 on a pass, 1 on any finding and 2 if the capture cannot be read, and lists the rules that never applied as "not checked". **Lenient mode** is for the DIFI-Certification reference captures: it checks context packets in full and data packets' prologues only, skips version packets, and accepts the Gain word, 8- to 16-bit samples and the change indicator on every context packet. The reader takes classic pcap and pcapng, decided by content (the reference captures are classic pcap named `.pcapng`), strips VLAN tags, and stops on anything that would lose a datagram silently: a truncated record, an IPv4 fragment, a link type other than Ethernet.
+
+In Python, `check(packets, source=CounterRamp())` returns a report whose `findings` are (rule, packet index, message); `Checker().feed(packet)` takes one packet at a time.
+
+## Tests
 
 Run the tests from the repository root:
 

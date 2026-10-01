@@ -1,9 +1,12 @@
-"""Ideal tone: int16 range, continuity across packets, frequency and purity."""
+"""Sources. Ideal tone: int16 range, continuity across packets, frequency and purity.
+Counter ramp: I = n mod 2**16 and Q = NOT I, continuous across packets."""
+from array import array
+
 import numpy as np
 import pytest
 
 from conftest import assert_same
-from difi_ref.sources import IdealTone
+from difi_ref.sources import CounterRamp, IdealTone
 
 FS = 192_000
 NFFT = 4096
@@ -54,3 +57,31 @@ def test_phase_from_global_index():
 def test_rejects_bad_settings(kwargs):
     with pytest.raises((TypeError, ValueError)):
         IdealTone(**kwargs)
+
+
+# ---- counter ramp ------------------------------------------------------------------------
+
+def test_ramp_values():
+    ramp = CounterRamp()
+    assert list(ramp.samples(0, 3)) == [0, -1, 1, -2, 2, -3]
+    assert list(ramp.samples(0x7FFF, 2)) == [32767, -32768, -32768, 32767]
+    assert list(ramp.samples(0xFFFF, 2)) == [-1, 0, 0, -1]
+    assert_same(ramp.samples(5 * 2**16 + 123, 360), ramp.samples(123, 360))
+
+
+def test_ramp_as_unsigned_words():
+    # The register map's definition, on the 16-bit words: I = n mod 2**16, Q = NOT I.
+    start = 10**12 + 65_000
+    words = array("H", CounterRamp().samples(start, 1000).tobytes())
+    assert_same(words[0::2], [(start + k) % 2**16 for k in range(1000)])
+    assert_same(words[1::2], [~(start + k) & 0xFFFF for k in range(1000)])
+
+
+def test_ramp_continuous_across_packets():
+    ramp = CounterRamp()
+    assert_same(ramp.samples(65_400, 720), ramp.samples(65_400, 360) + ramp.samples(65_760, 360))
+
+
+def test_ramp_rejects_negative_index():
+    with pytest.raises(ValueError):
+        CounterRamp().samples(-1, 1)

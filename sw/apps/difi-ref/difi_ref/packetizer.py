@@ -6,20 +6,12 @@ packets without it, each carrying the timestamp of the data packet that follows,
 separate 4-bit counts for data and context packets. Commits, FORCE_CONTEXT and
 overflow come in iterations 4 and 5.
 """
-import struct
 import sys
 from array import array
 from typing import Iterator, NamedTuple
 
 from . import fields
 from .config import StreamConfig
-
-_PROLOGUE = struct.Struct(">IIIIIQ")
-# CIF0, reference point, bandwidth, IF reference frequency, RF reference frequency,
-# IF band offset, reference level, gain, sample rate, timestamp adjustment, timestamp
-# calibration time, State and Event, payload format (2 words).
-_CONTEXT_BODY = struct.Struct(">IIQQQQIIQqIIII")
-assert _PROLOGUE.size + _CONTEXT_BODY.size == 4 * fields.CONTEXT_WORDS
 
 
 class Packet(NamedTuple):
@@ -34,7 +26,7 @@ class Packet(NamedTuple):
 
 def _prologue(header: int, cfg: StreamConfig, packet_class: int, sec: int, ps: int) -> bytes:
     fields.check_timestamp(sec, ps)
-    return _PROLOGUE.pack(header, cfg.stream_id, *fields.class_id_words(packet_class), sec, ps)
+    return fields.PROLOGUE.pack(header, cfg.stream_id, *fields.class_id_words(packet_class), sec, ps)
 
 
 def data_packet(cfg: StreamConfig, count: int, sec: int, ps: int, iq: array) -> bytes:
@@ -53,7 +45,7 @@ def context_packet(cfg: StreamConfig, count: int, sec: int, ps: int, changed: bo
     """One Standard Flow Signal Context packet, fields copied from cfg."""
     header = fields.context_header(count)
     cif0 = fields.CIF0 | (fields.CHANGE_INDICATOR if changed else 0)
-    body = _CONTEXT_BODY.pack(
+    body = fields.CONTEXT_BODY.pack(
         cif0,
         cfg.ctx_ref_point_id,
         fields.hz_to_q44_20(cfg.ctx_bandwidth_hz),

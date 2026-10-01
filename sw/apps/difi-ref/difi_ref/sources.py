@@ -1,7 +1,7 @@
 """Sample sources: complex int16 samples at the output rate, by global sample index.
 
 A source returns interleaved I, Q as array('h') for samples [start, start + count).
-Taking the phase from the global index keeps the signal continuous across packets
+Deriving each sample from its global index keeps the signal continuous across packets
 and, later, across dropped packets.
 """
 import math
@@ -35,4 +35,22 @@ class IdealTone:
             angle = step * ((self.freq_hz * (start + k)) % self.sample_rate_hz)
             out[2 * k] = round(scale * math.cos(angle))
             out[2 * k + 1] = round(scale * math.sin(angle))
+        return out
+
+
+class CounterRamp:
+    """SRC_SEL = 2: I = n mod 2**16 and Q = NOT I, as int16, n the output sample index.
+
+    n counts output sample periods from ENABLE and keeps counting through dropped
+    packets, so the samples of every packet are fixed by its first sample's index.
+    """
+
+    def samples(self, start: int, count: int) -> array:
+        if start < 0:
+            raise ValueError(f"sample index {start} is negative")
+        out = array("h", bytes(4 * count))
+        for k in range(count):
+            i = ((start + k + 0x8000) & 0xFFFF) - 0x8000    # n mod 2**16, read as int16
+            out[2 * k] = i
+            out[2 * k + 1] = ~i                             # NOT of the 16 bits, as int16
         return out

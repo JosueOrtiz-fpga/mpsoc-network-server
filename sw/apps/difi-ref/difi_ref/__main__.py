@@ -2,6 +2,7 @@
 
 Examples, from sw/apps/difi-ref:
     python3 -m difi_ref out.pcap --seconds 2
+    python3 -m difi_ref ramp.pcap --ramp && python3 -m difi_ref.checker ramp.pcap --ramp
     (cd /tmp && python3 $OLDPWD/../../../third_party/DIFI-Certification/certify_source.py --pcap $OLDPWD/out.pcap)
     python3 -m difi_ref --udp 127.0.0.1:50000 --gr-difi --seconds 10     # into gr-difi, in real time
 """
@@ -13,7 +14,7 @@ from .config import StreamConfig
 from .packetizer import Packetizer
 from .pcap import write_pcap
 from .replay import gr_difi_payload, parse_dest, replay, resolve
-from .sources import IdealTone
+from .sources import CounterRamp, IdealTone
 from .timebase import IdealTimebase
 
 
@@ -36,6 +37,7 @@ def main(argv=None) -> None:
     p.add_argument("--seconds", type=float, default=2.0, help="stream length (default 2 s)")
     p.add_argument("--seed", type=int, help="timebase seed, POSIX seconds (default: now)")
     p.add_argument("--tone-hz", type=int, default=12_000, help="tone offset from the band center (default 12 kHz)")
+    p.add_argument("--ramp", action="store_true", help="the counter ramp instead of the tone")
     p.add_argument("--rf-hz", type=int, default=StreamConfig.ctx_rf_ref_freq_hz,
                    help="RF reference frequency (default 7.1 MHz)")
     args = p.parse_args(argv)
@@ -48,14 +50,15 @@ def main(argv=None) -> None:
 
     seed = int(time.time()) if args.seed is None else args.seed
     cfg = StreamConfig(ctx_rf_ref_freq_hz=args.rf_hz, ctx_ts_cal_time=seed)
-    source = IdealTone(args.tone_hz, cfg.ctx_sample_rate_hz)
+    source = CounterRamp() if args.ramp else IdealTone(args.tone_hz, cfg.ctx_sample_rate_hz)
     pkt = Packetizer(cfg, source, IdealTimebase(seed, cfg.fs_in_hz, cfg.ddc_decim))
     num_data = math.ceil(args.seconds * cfg.ctx_sample_rate_hz / cfg.samples_per_pkt)
     # Generated in full before a replay, so generation cannot hold up the pacing;
     # written as generated when there is only a capture.
     packets = list(pkt.packets(num_data)) if args.udp else pkt.packets(num_data)
     print(f"{num_data} data packets, {cfg.ctx_sample_rate_hz} S/s "
-          f"at {cfg.ctx_rf_ref_freq_hz} Hz, tone {args.tone_hz:+d} Hz, seed {seed}")
+          f"at {cfg.ctx_rf_ref_freq_hz} Hz, {'counter ramp' if args.ramp else f'tone {args.tone_hz:+d} Hz'}, "
+          f"seed {seed}")
     if args.pcap:
         with open(args.pcap, "wb") as f:
             n = write_pcap(f, packets)
