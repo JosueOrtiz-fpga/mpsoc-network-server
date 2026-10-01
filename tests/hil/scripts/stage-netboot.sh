@@ -72,7 +72,7 @@ id=$(sed -n 's/^git: //p' "$sw/manifest.txt" | head -n1 | tr -c 'A-Za-z0-9._\n-'
 dest="$HIL_SRV/$id"
 case "$dest" in "$HIL_SRV"/?*) ;; *) die "refusing to use $dest" ;; esac
 
-# Static version of the netboot script's __symbols__ check (followups section 2).
+# Static version of the netboot script's __symbols__ check.
 if command -v fdtget >/dev/null; then
   if fdtget -l "$sw/system.dtb" / | grep -qx __symbols__; then
     say "system.dtb has __symbols__"

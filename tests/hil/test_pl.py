@@ -1,9 +1,9 @@
 """PL package: loading through dfx-mgr, and the fabric design's registers and sensor.
 
-Follows edf-2026_1-followups.md, section 3. The PL clock runs only while the overlay
+The PL clock runs only while the overlay
 is loaded and a PL register read without it would probably hang the board, so every
 test leaves the overlay loaded. Load/unload cycles leak a little kernel memory per
-cycle (section 5), hence the small count.
+cycle, hence the small count.
 
 make hil-stage installs one PL package as dfx-mgr's default firmware
 (/lib/firmware/xilinx/$HIL_PL_PKG/), which dfx-mgr-fw-load.service loads at boot.
@@ -96,7 +96,7 @@ def test_pl_load(board, hil_env):
 
 
 def read_temperature(board, bus):
-    """One-shot STTS22H conversion (followups section 3): reset, one-shot, wait for
+    """One-shot STTS22H conversion: reset, one-shot, wait for
     BUSY to clear, read the signed 16-bit result in 0.01 C steps."""
     for reg, value in ((0x0C, 0x02), (0x0C, 0x00), (0x04, 0x01)):
         board.i2c_set(bus, SENSOR, reg, value)
