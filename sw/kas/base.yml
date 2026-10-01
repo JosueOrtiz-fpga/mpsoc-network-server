@@ -107,3 +107,9 @@ local_conf_header:
     CONF_VERSION = "2"
     # Keep work dirs small on the runner; logs are kept.
     INHERIT += "rm_work"
+    # BitBake's hash-equivalence database (hashserv.db) lives in PERSISTENT_DIR, by
+    # default build/yocto/cache. Keep it next to the shared state it describes, so a
+    # fresh build directory (make release's worktree) reuses the equivalences and does
+    # not miss sstate objects it already has. Under SSTATE_DIR because kas-container
+    # mounts only that and DL_DIR.
+    PERSISTENT_DIR = "${SSTATE_DIR}/persistent"

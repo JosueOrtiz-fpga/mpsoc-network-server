@@ -81,8 +81,6 @@ zub1cg-project/
 ├── .gitignore
 ├── hw/                            # Everything Vivado touches
 │   ├── Makefile                   # lint | sim | project | bit | xsa | plpkg | stem | wrapper | clean
-│   ├── architecture.md            # DIFI streaming architecture
-│   ├── development_plan.md        # Releases R0-R7
 │   ├── scripts/
 │   │   ├── common.tcl             # Shared settings, version guard, helpers
 │   │   ├── create_project.tcl     # Throwaway project from committed sources
@@ -104,17 +102,23 @@ zub1cg-project/
 │   ├── scripts/                   # SDTGen, gen-machine-conf, PL overlay, artifact collection
 │   ├── meta-zub1cg/               # BSP layer
 │   ├── meta-zub1cg-app/           # .gitkeep: product layer, created with its first recipe
-│   └── apps/                      # .gitkeep: application sources
+│   └── apps/
+│       └── difi-ref/              # DIFI reference model, host-side Python (make ref-test)
 ├── tests/hil/                     # HIL suite (make hil)
 │   ├── test_*.py, conftest.py     # Tests and the session fixture that boots the board
 │   ├── harness/                   # Console, JTAG boot, SSH access
 │   └── scripts/                   # Host setup, staging, JTAG boot, netboot (README.md)
+├── third_party/
+│   └── DIFI-Certification/        # Submodule, pinned: the DIFI Consortium's oracle
 ├── ci/
 │   ├── release.sh                 # make release
 │   ├── containers/                # .gitkeep: CI is deferred
 │   ├── hil/
 │   └── pipeline/
 └── docs/
+    ├── difi-streaming-architecture.md  # DIFI streaming architecture (+ its *.svg)
+    ├── development_plan.md        # Releases R0-R7, M1
+    ├── m1-reference-model.md      # M1 work breakdown (+ its *.svg)
     └── release-notes-template.md  # Filled in by make release
 ```
 
@@ -139,9 +143,10 @@ All pins live in `versions.env`, which both `make` and `sh` can read:
 VIVADO_VERSION=2026.1
 PART=xczu1cg-sbva484-1-e
 BOARD_PART=avnet-tria:zuboard_1cg:part0:1.2
-EDF_RELEASE=TODO
-YOCTO_CODENAME=TODO
-KAS_VERSION=TODO
+VERILATOR_VERSION=5.052
+EDF_RELEASE=2026.1
+YOCTO_CODENAME=scarthgap
+KAS_VERSION=5.4
 ```
 
 The build refuses to run under a different Vivado version, and so does the generated BD script. The EDF / meta-xilinx release must correspond to `VIVADO_VERSION`; it gets filled in when the Yocto side is set up. Tool upgrades happen as a single deliberate commit: bump `versions.env`, upgrade the BD in the new Vivado, re-export `mpsoc_bd.tcl`, and regenerate `platform/`.
@@ -158,7 +163,9 @@ Build container. Yocto builds run in the kas 5.4 container on Debian 12 (KAS_CON
 
 - Vivado 2026.1 on `PATH` (`source <install>/2026.1/Vivado/settings64.sh`); this also provides `bootgen`
 - ZUBoard 1CG board files installed for that Vivado version
-- Optional: Verilator for `make hw-lint`
+- Submodules: clone with `--recurse-submodules`, or run `git submodule update --init` in an existing checkout (`third_party/DIFI-Certification`, for `make ref-test`)
+- Python packages from apt (pip is not used): `tests/hil/scripts/setup-host.sh` installs pytest, Construct, numpy, scapy, matplotlib and PyYAML
+- Verilator `VERILATOR_VERSION` (`versions.env`) for `make hw-lint` and the cocotb testbenches; `tests/hil/scripts/setup-host.sh` builds it into `/opt/verilator-<version>` (Ubuntu 22.04's package is 4.x)
 - KAS scripts: ```git clone --branch 5.4 https://github.com/siemens/kas.git ~/.local/src/kas; sudo ln -s ~/.local/src/kas/kas-container /usr/local/bin/kas-container``` 
 - Docker ```curl -fsSL https://get.docker.com | sh; sudo usermod -aG docker $USER; newgrp docker```
 
@@ -216,12 +223,13 @@ make sw-sdk          # EDF application SDK
 make hil-stage       # stage out/sw and the PL package for netboot (PL_STEM=<stem> for another)
 make jtag-boot       # boot the staged build over JTAG, console by hand
 make hil             # hil-stage + JTAG boot + pytest suite; logs in out/hil/<id>/<time>/
+make ref-test        # DIFI reference model tests (host only, no board)
 make release         # on a v* tag, clean tree: full build + HIL → /srv/releases/<tag>/
 ```
 
 The HIL bench (host setup, staging, boot flow) is described in [`tests/hil/scripts/README.md`](tests/hil/scripts/README.md).
 
-Yocto downloads and shared state live in `~/.cache/zub1cg-yocto/` (`YOCTO_CACHE`, or `DL_DIR` and `SSTATE_DIR` directly), outside the checkout, so a fresh checkout or release worktree builds incrementally.
+Yocto downloads and shared state live in `~/.cache/zub1cg-yocto/` (`YOCTO_CACHE`, or `DL_DIR` and `SSTATE_DIR` directly), outside the checkout, so a fresh checkout or release worktree builds incrementally. BitBake's hash-equivalence database goes with them (`PERSISTENT_DIR`, in `sstate-cache/persistent/`); without it a fresh build directory misses sstate objects that exist.
 
 ### What rebuilds when
 
@@ -238,13 +246,13 @@ On MPSoC, the PS configuration is applied by the FSBL at boot. A PS change made 
 
 ### Releases
 
-`make release` refuses to run with local changes, untracked files, or a HEAD without its `v*` tag. It builds the tag in a clean worktree (`build/release/<tag>/`), runs `hw-lint`, `hw-sim`, `hw-xsa`, `hw-plpkg`, `platform-check`, `sw-image` (plus `sw-sdk` with `RELEASE_SDK=1`) and `make hil`, and on a pass collects the artifacts, the HIL report, `SHA256SUMS` and a pre-filled `RELEASE_NOTES.md` into `/srv/releases/<tag>/`, which is never overwritten. Tag locally, run it, and push the tag only if it passes (see the release process in [`hw/development_plan.md`](hw/development_plan.md#release-process)).
+`make release` refuses to run with local changes, untracked files, or a HEAD without its `v*` tag. It builds the tag in a clean worktree (`build/release/<tag>/`), runs `hw-lint`, `hw-sim`, `hw-xsa`, `hw-plpkg`, `platform-check`, `sw-image` (plus `sw-sdk` with `RELEASE_SDK=1`) and `make hil`, and on a pass collects the artifacts, the HIL report, `SHA256SUMS` and a pre-filled `RELEASE_NOTES.md` into `/srv/releases/<tag>/`, which is never overwritten. Tag locally, run it, and push the tag only if it passes (see the release process in [`docs/development_plan.md`](docs/development_plan.md#release-process)).
 
 ---
 
 ## CI pipeline
 
-> **Deferred** (see [`hw/development_plan.md`](hw/development_plan.md#deferred)). This section records the design for later. No `.gitlab-ci.yml` exists; until then, releases are built and tested with `make release` on LNXPC, which is the sequence a pipeline would run, and `make hil` is the part labgrid would take over.
+> **Deferred** (see [`docs/development_plan.md`](docs/development_plan.md#deferred)). This section records the design for later. No `.gitlab-ci.yml` exists; until then, releases are built and tested with `make release` on LNXPC, which is the sequence a pipeline would run, and `make hil` is the part labgrid would take over.
 
 ### Platform choice
 
@@ -317,7 +325,7 @@ This stage boots the new images on the dedicated board and runs `tests/hil`. See
 
 | Data | Location | Retention |
 |---|---|---|
-| Yocto `DL_DIR` and `SSTATE_DIR` | Runner host, persistent volume (today: `~/.cache/zub1cg-yocto/` on LNXPC) | Pruned periodically |
+| Yocto `DL_DIR` and `SSTATE_DIR` (with `PERSISTENT_DIR` inside it) | Runner host, persistent volume (today: `~/.cache/zub1cg-yocto/` on LNXPC) | Pruned periodically |
 | Vivado and builder container images | Runner host local image store | Rebuilt on `versions.env` change |
 | XSA, PL package, reports | GitLab artifacts | Short expiry on branches; kept on tags |
 | WIC images, SDKs | Runner host, `/srv/ci-artifacts/<sha>/` | Kept for tags; pruned otherwise |

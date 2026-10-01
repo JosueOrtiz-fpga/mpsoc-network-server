@@ -25,7 +25,7 @@ setenv hil_kaddr 0x00200000
 tftpboot ${hil_kaddr} @HIL_ID@/Image      || exit
 tftpboot ${hil_faddr} @HIL_ID@/system.dtb || exit
 
-# edf-2026_1-followups.md section 2: the PL overlay needs labels from the base
+# The PL overlay needs labels from the base
 # DTB, so it must carry __symbols__ (dtc -@). Warn only; Linux still boots.
 fdt addr ${hil_faddr}
 if fdt get value hil_sym /__symbols__ amba; then

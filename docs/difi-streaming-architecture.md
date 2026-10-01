@@ -200,7 +200,7 @@ Bring-up uses UIO for the register bank plus a `udmabuf` region with single-shot
 
 **Ring ownership.** The status page holds a producer index, advanced by the driver as DMA completes slots, and a consumer index, advanced by the sender after `sendmmsg` returns. `poll()` wakes the sender when the producer index moves, and the driver re-queues every slot the sender has released. The DMA never writes a slot the sender still owns, so a slow sender fills the ring and stalls the DMA, which shows up as PL FIFO overflow rather than as corrupted packets. The sender records the ring's occupancy high-water mark.
 
-The PL is loaded at runtime by FPGA Manager and can be replaced at runtime, as described in `edf-2026_1-followups.md`, section 3. The driver must therefore stop the stream and release the DMA ring in its `remove` path, before the overlay is removed.
+The PL is loaded at runtime by FPGA Manager and can be replaced at runtime. The driver must therefore stop the stream and release the DMA ring in its `remove` path, before the overlay is removed.
 
 The interrupt must be wired to `pl_ps_irq0` in `hw/bd/mpsoc_bd.tcl`, so that Lopper generates `interrupts`/`interrupt-parent` in the overlay. This is the same issue already open for `axi_iic_0`.
 
@@ -600,4 +600,4 @@ GPS time as the integer-seconds timestamp (TSI GPS). The PL's part is small: the
 - AMD PG021: AXI DMA LogiCORE IP product guide
 - AMD UG1085: Zynq UltraScale+ Device Technical Reference Manual
 - ZUBoard 1CG Hardware User Guide v1.0 and schematic AES-ZUB-1CG-DK-G Rev 1 (Ethernet: sheet 7)
-- Project: `README.md`, `edf-2026_1-followups.md` (section 3, PL overlay), `sw/meta-zub1cg/board-dts/zub1cg-board.dtsi`
+- Project: `README.md`, `sw/meta-zub1cg/board-dts/zub1cg-board.dtsi`

@@ -1,8 +1,9 @@
 <!--
 Release-notes template. ci/release.sh (make release) fills in the @...@ fields and
-writes RELEASE_NOTES.md into the release directory. The sections marked TODO are
-for a person: complete them before pushing the tag. Contents follow the release
-process in hw/development_plan.md.
+writes RELEASE_NOTES.md into the release directory, without this comment. The
+sections marked TODO are for a person: complete them before pushing the tag.
+SHA256SUMS leaves the notes out, so editing them breaks no checksum. Contents
+follow the release process in docs/development_plan.md.
 -->
 # @TAG@
 
@@ -22,7 +23,7 @@ TODO: the release's goal from the development plan, and what you can do with it.
 
 ## Architecture sections implemented
 
-TODO: the sections of `hw/architecture.md` this release implements, fully or in part.
+TODO: the sections of `docs/difi-streaming-architecture.md` this release implements, fully or in part.
 
 ## Interim behaviour in effect
 
@@ -49,4 +50,4 @@ TODO: or "None".
 | `hil/` | HIL report: `junit.xml`, `console.log`, `jtag-boot.log`, `commands.log` |
 | `manifest.txt`, `layers.lock.yml` | Build identity and pinned Yocto layers |
 | `release.log` | Full build and test log |
-| `SHA256SUMS` | Checksums of every file above |
+| `SHA256SUMS` | Checksums of every file above (not of these notes, which are edited after the build) |
