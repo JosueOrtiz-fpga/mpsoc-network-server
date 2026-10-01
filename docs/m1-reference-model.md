@@ -11,6 +11,7 @@ Work breakdown for M1 in the [development plan](development_plan.md#m1-reference
 - [Work items](#work-items)
 - [Iterations](#iterations)
   - [Stand-ins and the interfaces they keep](#stand-ins-and-the-interfaces-they-keep)
+  - [Mutation checks](#mutation-checks)
 - [Out of scope](#out-of-scope)
 - [Use in later releases](#use-in-later-releases)
 - [Exit criteria](#exit-criteria)
@@ -34,6 +35,7 @@ Panel 1 is the pre-check setup. Panel 2 follows one `make ref-rx-check` run step
 
 - **`gr-difi`'s receive checks are narrow.** At commit `330dd7f`, its source block (`lib/difi_source_cpp_impl.cc`) rejects only a context packet that is not 108 B (or 72 B), a payload-format bit depth that differs from its configured depth, and, as a warning, gaps in the data packet count. It does not check class ID, OUI, CIF0 or timestamps. The [field values](difi-streaming-architecture.md#field-values) satisfy all three checks, so the pre-check is expected to pass on the first run. It reads Reference Level from bits 15:0, which agrees with the spec reading in [Oracle caveats](difi-streaming-architecture.md#oracle-caveats).
 - **Everything installs from apt on Ubuntu 22.04.** GNU Radio 3.10.1 with `gnuradio-dev`, `pybind11-dev`, `liborc-0.4-dev`, and `python3-construct` (2.10.67), `python3-numpy`, `python3-scapy`, `python3-yaml`. `gr-difi` is built from source, pinned to `330dd7f`. pip is not installed on LNXPC.
+- **`certify_source.py` reports, it does not fail.** At `6ee49d1e` it exits 0 even when the capture fails; the verdict is its `Overall Result` line (and `overall_result` in its summary YAML). Data packets that arrive before the first context packet are skipped without being counted, so a test must also compare its compliant counts with the packets generated. It writes its error log, summary and plots into the working directory. Found in iteration 1; `tests/test_certify.py` handles all three.
 - **`make release` breaks once the submodule exists.** `git worktree add` does not initialize submodules, so `ci/release.sh` needs `git submodule update --init` in the worktree.
 
 ## Design choices
@@ -90,6 +92,45 @@ Two pitfalls are avoided from the start:
 
 - **No floating point in timestamps.** A POSIX time in picoseconds is about 1.8 · 10²¹, beyond the 53-bit mantissa of a double, so timestamps use integer arithmetic throughout. With 360 samples per packet, the packet period is a whole number of picoseconds at every main rate (`DDC_DECIM` × 2,929,687.5 ps, and every main decimation is even), so the ideal timestamps of packet starts involve no rounding. Single samples do not fall on whole picoseconds (`DDC_DECIM` × 8,138.02… ps), which is why the real timebase needs a rounding rule in iteration 5.
 - **A tone on an FFT bin, below full scale.** For example, +12 kHz at 192 kS/s falls exactly on bin 256 of a 4096-point FFT. With an amplitude of about −6 dBFS before rounding to int16, the FFT check can only fail for reasons that matter.
+
+### Mutation checks
+
+A test suite that passes on its first run proves little until it has been seen to fail. At the end of iteration 1, the model was broken on purpose, one fault at a time, to confirm that `make ref-test` catches each fault and names it.
+
+These are manual checks of the tests, not part of the suite. They differ from the checker's mutation tests (work item 6, iteration 3), which corrupt packets fed to the checker and run in every `make ref-test`.
+
+**Method.** Copy `sw/apps/difi-ref/difi_ref/` aside. Then for each mutant:
+
+1. Apply a one-line edit to the model.
+2. Run the suite.
+3. Record which tests fail.
+4. Restore the file from the copy.
+
+Finish with `diff -r` against the copy, to confirm the model is back to the original. A mutant must change the generated output; an edit that changes nothing proves nothing (one of the first round's edits did exactly that and was replaced).
+
+**Results at iteration 1.** Every mutant was caught, each run took under 5 s, and the failing tests point at the fault:
+
+| Mutant | Edit | Failing tests | Seen by the oracle? |
+|---|---|---|---|
+| No change indicator on the first context packet | `packetizer.py`: first context with `changed` false | `test_context_first_with_change_indicator`, `test_periodic_context_without_change_indicator` | No |
+| Context timestamp one packet late | `packetizer.py`: context packet stamped with the following packet's time | `test_context_carries_next_data_timestamp` | No |
+| One count for both packet types | `packetizer.py`: data count also advances on each context packet | `test_counts_continuous_per_type`, `test_generated_capture_passes` | `certify_source.py` only |
+| Little-endian payload | `packetizer.py`: no byte swap | `test_payload_is_big_endian_i_then_q` | No |
+| I and Q swapped | `sources.py`: I from the sine | `test_peak_on_its_bin_and_clean` (both signs), `test_phase_from_global_index` | No |
+| Reference Level in bits 31:16 | `fields.py`: Q9.7 value shifted up 16 bits | `test_ref_level` (4 cases), `test_ref_level_round_trip_and_range`, `test_words_the_oracle_reads_differently` | No; the oracle reads that half itself (see [Oracle caveats](difi-streaming-architecture.md#oracle-caveats)) |
+| Floating-point timestamps | `timebase.py`: `int(n · D / fs · 10¹²)` | `test_data_timestamps_step_by_packet_period` | No |
+| Wrong OUI | `fields.py`: `0x6A621F` | `test_every_packet_passes_validate`, `test_generated_capture_passes`, `test_class_id`, `test_header_and_class_words` | Yes |
+| Every timestamp one second late | `timebase.py`: seed + 1 | `test_data_timestamps_step_by_packet_period` and the timebase tests (11 in all) | No |
+| Tone phase restarting each packet | `sources.py`: phase from the in-packet index | `test_continuous_across_packets`, `test_phase_from_global_index` | No |
+
+Only two of the ten faults are visible to the DIFI-Certification tools. The model's own tests carry the rest, which is why the stream checker in iteration 3 has to cover them too.
+
+**What the checks found in the tests themselves.**
+
+- **pytest 6 stalls on long failing comparisons.** A failed `assert` on two 1,100-element lists made pytest diff them with `difflib` for 252 s before failing with a `RecursionError`, so a regression would have looked like a hang. Long sequences are now compared with `assert_same` in `tests/conftest.py`, which reports only the first difference.
+- **A test line that could not fail.** One check compared a call's result with the same call. It was replaced with a real continuity check at sample index 10¹².
+
+**Next time.** Repeat these checks at the end of each iteration for the code that iteration adds: the checker in 3, commits in 4, the timebase and overflow in 5. Keep the table above current.
 
 ## Out of scope
 
