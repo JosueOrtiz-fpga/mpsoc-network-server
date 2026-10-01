@@ -83,10 +83,13 @@ EOF
   # dnsmasq + nfs-kernel-server: the TFTP and NFS servers the board boots from.
   # u-boot-tools (mkimage) builds boot.scr, device-tree-compiler (fdtget) checks the DTB,
   # picocom is the serial console for J16, openssh-client logs in to the board,
-  # python3-pytest runs the suite in tests/hil (make hil). The rest builds Verilator (step 4)
+  # python3-pytest runs the suite in tests/hil (make hil). python3-construct is the DIFI
+  # oracle's packet parser (make ref-test); numpy, scapy, matplotlib and yaml are what
+  # DIFI-Certification's certify_source.py imports. The rest builds Verilator (step 4)
   # and the models it generates.
   sudo apt-get install -y dnsmasq nfs-kernel-server u-boot-tools device-tree-compiler picocom \
     openssh-client python3-pytest \
+    python3-construct python3-numpy python3-scapy python3-matplotlib python3-yaml \
     git autoconf flex bison help2man g++ make perl python3 libfl2 libfl-dev zlib1g-dev
 
   step "4/11 Verilator $VERILATOR_VERSION in $verilator_prefix (make hw-lint, cocotb)"
@@ -218,8 +221,10 @@ verify() {
   for t in mkimage fdtget picocom ssh; do
     command -v "$t" >/dev/null && ok "$t found" || warn "$t not found (setup step 3)"
   done
-  if python3 -c 'import pytest' 2>/dev/null; then ok "pytest found"
-  else warn "pytest not found for python3 (setup step 3)"; fi
+  for t in pytest construct numpy scapy matplotlib yaml; do
+    if python3 -c "import $t" 2>/dev/null; then ok "python3 module $t found"
+    else warn "python3 module $t not found (setup step 3)"; fi
+  done
   for t in xsdb bootgen; do
     command -v "$t" >/dev/null && ok "$t found" || warn "$t not on PATH: source <Vivado install>/settings64.sh in this shell"
   done

@@ -102,11 +102,14 @@ zub1cg-project/
 │   ├── scripts/                   # SDTGen, gen-machine-conf, PL overlay, artifact collection
 │   ├── meta-zub1cg/               # BSP layer
 │   ├── meta-zub1cg-app/           # .gitkeep: product layer, created with its first recipe
-│   └── apps/                      # .gitkeep: application sources
+│   └── apps/
+│       └── difi-ref/              # DIFI reference model, host-side Python (make ref-test)
 ├── tests/hil/                     # HIL suite (make hil)
 │   ├── test_*.py, conftest.py     # Tests and the session fixture that boots the board
 │   ├── harness/                   # Console, JTAG boot, SSH access
 │   └── scripts/                   # Host setup, staging, JTAG boot, netboot (README.md)
+├── third_party/
+│   └── DIFI-Certification/        # Submodule, pinned: the DIFI Consortium's oracle
 ├── ci/
 │   ├── release.sh                 # make release
 │   ├── containers/                # .gitkeep: CI is deferred
@@ -115,6 +118,7 @@ zub1cg-project/
 └── docs/
     ├── difi-streaming-architecture.md  # DIFI streaming architecture (+ its *.svg)
     ├── development_plan.md        # Releases R0-R7, M1
+    ├── m1-reference-model.md      # M1 work breakdown (+ its *.svg)
     └── release-notes-template.md  # Filled in by make release
 ```
 
@@ -159,6 +163,8 @@ Build container. Yocto builds run in the kas 5.4 container on Debian 12 (KAS_CON
 
 - Vivado 2026.1 on `PATH` (`source <install>/2026.1/Vivado/settings64.sh`); this also provides `bootgen`
 - ZUBoard 1CG board files installed for that Vivado version
+- Submodules: clone with `--recurse-submodules`, or run `git submodule update --init` in an existing checkout (`third_party/DIFI-Certification`, for `make ref-test`)
+- Python packages from apt (pip is not used): `tests/hil/scripts/setup-host.sh` installs pytest, Construct, numpy, scapy, matplotlib and PyYAML
 - Verilator `VERILATOR_VERSION` (`versions.env`) for `make hw-lint` and the cocotb testbenches; `tests/hil/scripts/setup-host.sh` builds it into `/opt/verilator-<version>` (Ubuntu 22.04's package is 4.x)
 - KAS scripts: ```git clone --branch 5.4 https://github.com/siemens/kas.git ~/.local/src/kas; sudo ln -s ~/.local/src/kas/kas-container /usr/local/bin/kas-container``` 
 - Docker ```curl -fsSL https://get.docker.com | sh; sudo usermod -aG docker $USER; newgrp docker```
@@ -217,6 +223,7 @@ make sw-sdk          # EDF application SDK
 make hil-stage       # stage out/sw and the PL package for netboot (PL_STEM=<stem> for another)
 make jtag-boot       # boot the staged build over JTAG, console by hand
 make hil             # hil-stage + JTAG boot + pytest suite; logs in out/hil/<id>/<time>/
+make ref-test        # DIFI reference model tests (host only, no board)
 make release         # on a v* tag, clean tree: full build + HIL → /srv/releases/<tag>/
 ```
 

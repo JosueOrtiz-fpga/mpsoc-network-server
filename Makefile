@@ -7,7 +7,7 @@ HW_MAKE := $(MAKE) --no-print-directory -C hw
 
 .PHONY: help \
         hw-lint hw-sim hw-project hw-bit hw-xsa hw-plpkg hw-wrapper hw-clean \
-        platform platform-check sw-image sw-sdk sw-lock sw-shell hil hil-stage jtag-boot release clean
+        platform platform-check sw-image sw-sdk sw-lock sw-shell hil hil-stage jtag-boot ref-test release clean
 
 help:
 	@echo "Hardware (implemented):"
@@ -27,6 +27,9 @@ help:
 	@echo "  make hil-stage    Stage out/sw and the PL package for netboot (PL_STEM=<stem> picks another)"
 	@echo "  make jtag-boot    Boot the staged build over JTAG (console by hand)"
 	@echo "  make hil          hil-stage, JTAG-boot and run the pytest suite (PYTEST_ARGS=...)"
+	@echo ""
+	@echo "DIFI reference model (sw/apps/difi-ref, host only):"
+	@echo "  make ref-test     Run the difi-ref tests against the DIFI-Certification oracle (PYTEST_ARGS=...)"
 	@echo ""
 	@echo "Release:"
 	@echo "  make release      Clean checkout on a v* tag: full build + HIL in a worktree -> /srv/releases/<tag>"
@@ -79,6 +82,15 @@ hil: hil-stage
 	  && mkdir -p $$run && ln -sfn $$(basename $$run) out/hil/$$HIL_ID/latest \
 	  && echo "hil: run directory $$run" \
 	  && HIL_RUN_DIR=$(CURDIR)/$$run $(PYTEST) tests/hil --junitxml=$$run/junit.xml $(PYTEST_ARGS)
+
+# ---- DIFI reference model (docs/m1-reference-model.md) -----------------------
+# Host only, no board. Needs the DIFI-Certification submodule and the Python
+# packages that tests/hil/scripts/setup-host.sh installs.
+ORACLE_DIR := third_party/DIFI-Certification
+ref-test:
+	@test -f $(ORACLE_DIR)/certify_source.py \
+	  || { echo "ref-test: $(ORACLE_DIR) is empty: run git submodule update --init"; exit 1; }
+	$(PYTEST) sw/apps/difi-ref $(PYTEST_ARGS)
 
 # ---- Release (ci/release.sh) -------------------------------------------------
 # Refuses local changes, untracked files and a HEAD without its v* tag; builds the
