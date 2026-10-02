@@ -103,8 +103,9 @@ package tb_pkg;
       vif.mst_cb.bready <= 1'b0;
     endtask
 
-    // One 32-bit read: AR, then R.
-    task automatic read32(bit [31:0] offset, output bit [31:0] data, output bit [1:0] resp);
+    // One 32-bit read: AR, then R. DATA is 4-state so callers can tell an
+    // unknown RDATA from a real value.
+    task automatic read32(bit [31:0] offset, output logic [31:0] data, output bit [1:0] resp);
       bit ar_ok, r_ok;
       data = 'x;
       resp = 2'bxx;
@@ -190,16 +191,23 @@ package tb_pkg;
       end
     endtask
 
+    // Software only ever sees bits, so DATA is 2-state; an unknown RDATA
+    // bit (which reads as 0 here) counts as an error.
     task automatic read32(bit [31:0] addr, output bit [31:0] data);
       axi4_master #(bram_vif_t) port;
-      bit [31:0] offset;
-      bit [1:0]  resp;
-      data = 'x;
+      bit [31:0]   offset;
+      bit [1:0]    resp;
+      logic [31:0] rdata;
+      data = '0;
       if (!decode(addr, port, offset)) begin errors++; return; end
-      port.read32(offset, data, resp);
+      port.read32(offset, rdata, resp);
+      data = rdata;
       if (resp !== RESP_OKAY) begin
         errors++;
         $error("a53: read 0x%08h failed, RRESP=%b", addr, resp);
+      end else if ($isunknown(rdata)) begin
+        errors++;
+        $error("a53: read 0x%08h returned 0x%08h; unknown bits read as 0 (0x%08h)", addr, rdata, data);
       end
     endtask
   endclass

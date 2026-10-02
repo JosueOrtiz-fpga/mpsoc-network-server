@@ -1,8 +1,11 @@
 # xsim testbench for top with the simulation block design (SIM=1).
 #
 #   make            build the sim BD if needed, compile, elaborate and run
+#                   every test in TESTS, one xsim run (and log) per test
+#   make TESTS=ctl_init_handshake            run one test
+#   make PLUSARGS="A53_DELAY=2"              pass +A53_DELAY=2 to every run
 #   make project    rebuild the sim BD and its xsim export only
-#   make run WAVES=1  also record all signals to tb_top.wdb
+#   make run WAVES=1  also record all signals to tb_top_<test>.wdb
 #   make clean
 #
 # Prerequisite: Vivado $(VIVADO_VERSION) on PATH (source settings64.sh).
@@ -18,6 +21,8 @@ SIM_BD_NAME   ?= sim_mpsco_bd
 SIM_BUILD_DIR ?= $(REPO_ROOT)/build/sim
 XSIM_DIR      := $(SIM_BUILD_DIR)/export/$(SIM_BD_NAME)/xsim
 WAVES         ?= 0
+TESTS         ?= bringup ctl_init_handshake
+PLUSARGS      ?=
 
 VIVADO       ?= vivado
 VIVADO_BATCH := $(VIVADO) -mode batch -notrace
@@ -67,11 +72,16 @@ elab: compile
 run: elab
 	cd $(XSIM_DIR) && printf '%s\n' \
 	  $(if $(filter 1,$(WAVES)),'log_wave -recursive *') 'run all' 'quit' > run.tcl
-	cd $(XSIM_DIR) && xsim tb_top $(if $(filter 1,$(WAVES)),--wdb tb_top.wdb) \
-	  --tclbatch run.tcl -log simulate.log
-	@grep -q '^TEST PASSED' $(XSIM_DIR)/simulate.log || \
-	  { echo "hw-sim: FAILED (log: $(XSIM_DIR)/simulate.log)"; exit 1; }
-	@echo "hw-sim: passed (log: $(XSIM_DIR)/simulate.log)"
+	@cd $(XSIM_DIR) && failed=; for t in $(TESTS); do \
+	  xsim tb_top -testplusarg TEST=$$t $(foreach p,$(PLUSARGS),-testplusarg $(p)) \
+	    $(if $(filter 1,$(WAVES)),--wdb tb_top_$$t.wdb) --tclbatch run.tcl -log simulate_$$t.log; \
+	  grep -q '^TEST PASSED' simulate_$$t.log || failed="$$failed $$t"; \
+	done; \
+	for t in $(TESTS); do \
+	  case " $$failed " in *" $$t "*) r=FAILED;; *) r=passed;; esac; \
+	  echo "hw-sim: $$t $$r (log: $(XSIM_DIR)/simulate_$$t.log)"; \
+	done; \
+	[ -z "$$failed" ]
 
 clean:
 	rm -rf $(SIM_BUILD_DIR)

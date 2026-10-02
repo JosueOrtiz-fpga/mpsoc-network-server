@@ -1,10 +1,15 @@
 // Connects the simulation BD's exposed signals in top (SIM=1) to testbench
 // interfaces. tb_top binds it into top:
 //
-//   bind top sim_bd_harness u_sim_bd_harness (.*);
+//   bind top sim_bd_harness u_sim_bd_harness
+//     (.*, `SIM_BD_HARNESS_SIM_BD_PORTS(sim_mpsoc_bd));
 //
-// so every port name here matches a signal name in top. The testbench
-// reaches the interfaces as tb_top.dut.u_sim_bd_harness.<name>_if.
+// so every port name here matches a signal name in top. Signals top uses
+// itself sit at module scope and connect through .*; the SIM=1-only ones
+// are declared inside the sim_mpsoc_bd generate branch, which .* cannot
+// see, so SIM_BD_HARNESS_SIM_BD_PORTS names each of them by hierarchical
+// path. The testbench reaches the interfaces as
+// tb_top.dut.u_sim_bd_harness.<name>_if.
 //
 //   crst_if   clocks and resets into the BD           driven by the TB
 //   bram0_if  S_AXI_BRAM_0, the A53 into the CTL BRAM  TB is the master
@@ -84,6 +89,58 @@
   assign IF.rlast    = P``_rlast; \
   assign IF.rvalid   = P``_rvalid; \
   assign P``_rready  = IF.rready;
+
+// Bind port connections for the signals declared in generate scope S of top.
+// Used from tb_top, so these two stay defined after this file.
+`define SIM_BD_HARNESS_BRAM_BIND(S, P) \
+  .P``_awaddr(S.P``_awaddr),   .P``_awlen(S.P``_awlen), \
+  .P``_awsize(S.P``_awsize),   .P``_awburst(S.P``_awburst), \
+  .P``_awlock(S.P``_awlock),   .P``_awcache(S.P``_awcache), \
+  .P``_awprot(S.P``_awprot),   .P``_awvalid(S.P``_awvalid), \
+  .P``_awready(S.P``_awready), \
+  .P``_wdata(S.P``_wdata),     .P``_wstrb(S.P``_wstrb), \
+  .P``_wlast(S.P``_wlast),     .P``_wvalid(S.P``_wvalid), \
+  .P``_wready(S.P``_wready), \
+  .P``_bresp(S.P``_bresp),     .P``_bvalid(S.P``_bvalid), \
+  .P``_bready(S.P``_bready), \
+  .P``_araddr(S.P``_araddr),   .P``_arlen(S.P``_arlen), \
+  .P``_arsize(S.P``_arsize),   .P``_arburst(S.P``_arburst), \
+  .P``_arlock(S.P``_arlock),   .P``_arcache(S.P``_arcache), \
+  .P``_arprot(S.P``_arprot),   .P``_arvalid(S.P``_arvalid), \
+  .P``_arready(S.P``_arready), \
+  .P``_rdata(S.P``_rdata),     .P``_rresp(S.P``_rresp), \
+  .P``_rlast(S.P``_rlast),     .P``_rvalid(S.P``_rvalid), \
+  .P``_rready(S.P``_rready)
+
+`define SIM_BD_HARNESS_SIM_BD_PORTS(S) \
+  .clk_100MHz(S.clk_100MHz), \
+  .reset_rtl(S.reset_rtl), \
+  .n_reset_rtl(S.n_reset_rtl), \
+  `SIM_BD_HARNESS_BRAM_BIND(S, S_AXI_BRAM_0), \
+  `SIM_BD_HARNESS_BRAM_BIND(S, S_AXI_BRAM_1), \
+  .M_AXI_S2MM_0_awid(S.M_AXI_S2MM_0_awid), \
+  .M_AXI_S2MM_0_awaddr(S.M_AXI_S2MM_0_awaddr), \
+  .M_AXI_S2MM_0_awlen(S.M_AXI_S2MM_0_awlen), \
+  .M_AXI_S2MM_0_awsize(S.M_AXI_S2MM_0_awsize), \
+  .M_AXI_S2MM_0_awburst(S.M_AXI_S2MM_0_awburst), \
+  .M_AXI_S2MM_0_awcache(S.M_AXI_S2MM_0_awcache), \
+  .M_AXI_S2MM_0_awprot(S.M_AXI_S2MM_0_awprot), \
+  .M_AXI_S2MM_0_awuser(S.M_AXI_S2MM_0_awuser), \
+  .M_AXI_S2MM_0_awvalid(S.M_AXI_S2MM_0_awvalid), \
+  .M_AXI_S2MM_0_awready(S.M_AXI_S2MM_0_awready), \
+  .M_AXI_S2MM_0_wdata(S.M_AXI_S2MM_0_wdata), \
+  .M_AXI_S2MM_0_wstrb(S.M_AXI_S2MM_0_wstrb), \
+  .M_AXI_S2MM_0_wlast(S.M_AXI_S2MM_0_wlast), \
+  .M_AXI_S2MM_0_wvalid(S.M_AXI_S2MM_0_wvalid), \
+  .M_AXI_S2MM_0_wready(S.M_AXI_S2MM_0_wready), \
+  .M_AXI_S2MM_0_bresp(S.M_AXI_S2MM_0_bresp), \
+  .M_AXI_S2MM_0_bvalid(S.M_AXI_S2MM_0_bvalid), \
+  .M_AXI_S2MM_0_bready(S.M_AXI_S2MM_0_bready), \
+  .M_AXIS_S2MM_STS_0_tdata(S.M_AXIS_S2MM_STS_0_tdata), \
+  .M_AXIS_S2MM_STS_0_tkeep(S.M_AXIS_S2MM_STS_0_tkeep), \
+  .M_AXIS_S2MM_STS_0_tlast(S.M_AXIS_S2MM_STS_0_tlast), \
+  .M_AXIS_S2MM_STS_0_tvalid(S.M_AXIS_S2MM_STS_0_tvalid), \
+  .M_AXIS_S2MM_STS_0_tready(S.M_AXIS_S2MM_STS_0_tready)
 
 module sim_bd_harness (
   // From the BD

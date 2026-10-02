@@ -13,6 +13,11 @@ module top#(SIM=0)
 
     localparam PKT_LENGTH = 360;
 
+    // Address Map
+    localparam CTL_REG_ADDR = 32'h0;
+    localparam logic MEM_RD = 1'b0;
+    localparam logic MEM_WR = 1'b1;
+
     // clocks, resets
     logic pl_clk0;
     logic[0:0] aresetn;
@@ -23,7 +28,7 @@ module top#(SIM=0)
     logic S_AXIS_S2MM_0_tlast;
     logic S_AXIS_S2MM_0_tready;
     logic S_AXIS_S2MM_0_tvalid;
-    logic [111:0]S_AXIS_S2MM_CMD_0_tdata;
+    logic [79:0]S_AXIS_S2MM_CMD_0_tdata;
     logic S_AXIS_S2MM_CMD_0_tready;
     logic S_AXIS_S2MM_CMD_0_tvalid;
 
@@ -54,89 +59,25 @@ module top#(SIM=0)
     logic tempsensor_i2c_pl_sda_o;
     logic tempsensor_i2c_pl_sda_t;
 
-    // Simulation BD only (SIM=1). In the real design these sit inside
-    // mpsoc_bd (A53 masters, HPC0, PS clocks); the sim BD exposes them so the
-    // testbench (hw/sim) can drive and observe them. Unused when SIM=0.
-    wire clk_100MHz;
-    wire reset_rtl;
-    wire n_reset_rtl;
-
-    wire [11:0]S_AXI_BRAM_0_awaddr;  wire [11:0]S_AXI_BRAM_1_awaddr;
-    wire [7:0] S_AXI_BRAM_0_awlen;   wire [7:0] S_AXI_BRAM_1_awlen;
-    wire [2:0] S_AXI_BRAM_0_awsize;  wire [2:0] S_AXI_BRAM_1_awsize;
-    wire [1:0] S_AXI_BRAM_0_awburst; wire [1:0] S_AXI_BRAM_1_awburst;
-    wire       S_AXI_BRAM_0_awlock;  wire       S_AXI_BRAM_1_awlock;
-    wire [3:0] S_AXI_BRAM_0_awcache; wire [3:0] S_AXI_BRAM_1_awcache;
-    wire [2:0] S_AXI_BRAM_0_awprot;  wire [2:0] S_AXI_BRAM_1_awprot;
-    wire       S_AXI_BRAM_0_awvalid; wire       S_AXI_BRAM_1_awvalid;
-    wire       S_AXI_BRAM_0_awready; wire       S_AXI_BRAM_1_awready;
-    wire [31:0]S_AXI_BRAM_0_wdata;   wire [31:0]S_AXI_BRAM_1_wdata;
-    wire [3:0] S_AXI_BRAM_0_wstrb;   wire [3:0] S_AXI_BRAM_1_wstrb;
-    wire       S_AXI_BRAM_0_wlast;   wire       S_AXI_BRAM_1_wlast;
-    wire       S_AXI_BRAM_0_wvalid;  wire       S_AXI_BRAM_1_wvalid;
-    wire       S_AXI_BRAM_0_wready;  wire       S_AXI_BRAM_1_wready;
-    wire [1:0] S_AXI_BRAM_0_bresp;   wire [1:0] S_AXI_BRAM_1_bresp;
-    wire       S_AXI_BRAM_0_bvalid;  wire       S_AXI_BRAM_1_bvalid;
-    wire       S_AXI_BRAM_0_bready;  wire       S_AXI_BRAM_1_bready;
-    wire [11:0]S_AXI_BRAM_0_araddr;  wire [11:0]S_AXI_BRAM_1_araddr;
-    wire [7:0] S_AXI_BRAM_0_arlen;   wire [7:0] S_AXI_BRAM_1_arlen;
-    wire [2:0] S_AXI_BRAM_0_arsize;  wire [2:0] S_AXI_BRAM_1_arsize;
-    wire [1:0] S_AXI_BRAM_0_arburst; wire [1:0] S_AXI_BRAM_1_arburst;
-    wire       S_AXI_BRAM_0_arlock;  wire       S_AXI_BRAM_1_arlock;
-    wire [3:0] S_AXI_BRAM_0_arcache; wire [3:0] S_AXI_BRAM_1_arcache;
-    wire [2:0] S_AXI_BRAM_0_arprot;  wire [2:0] S_AXI_BRAM_1_arprot;
-    wire       S_AXI_BRAM_0_arvalid; wire       S_AXI_BRAM_1_arvalid;
-    wire       S_AXI_BRAM_0_arready; wire       S_AXI_BRAM_1_arready;
-    wire [31:0]S_AXI_BRAM_0_rdata;   wire [31:0]S_AXI_BRAM_1_rdata;
-    wire [1:0] S_AXI_BRAM_0_rresp;   wire [1:0] S_AXI_BRAM_1_rresp;
-    wire       S_AXI_BRAM_0_rlast;   wire       S_AXI_BRAM_1_rlast;
-    wire       S_AXI_BRAM_0_rvalid;  wire       S_AXI_BRAM_1_rvalid;
-    wire       S_AXI_BRAM_0_rready;  wire       S_AXI_BRAM_1_rready;
-
-    wire [3:0] M_AXI_S2MM_0_awid;
-    wire [31:0]M_AXI_S2MM_0_awaddr;
-    wire [7:0] M_AXI_S2MM_0_awlen;
-    wire [2:0] M_AXI_S2MM_0_awsize;
-    wire [1:0] M_AXI_S2MM_0_awburst;
-    wire [3:0] M_AXI_S2MM_0_awcache;
-    wire [2:0] M_AXI_S2MM_0_awprot;
-    wire [3:0] M_AXI_S2MM_0_awuser;
-    wire       M_AXI_S2MM_0_awvalid;
-    wire       M_AXI_S2MM_0_awready;
-    wire [31:0]M_AXI_S2MM_0_wdata;
-    wire [3:0] M_AXI_S2MM_0_wstrb;
-    wire       M_AXI_S2MM_0_wlast;
-    wire       M_AXI_S2MM_0_wvalid;
-    wire       M_AXI_S2MM_0_wready;
-    wire [1:0] M_AXI_S2MM_0_bresp;
-    wire       M_AXI_S2MM_0_bvalid;
-    wire       M_AXI_S2MM_0_bready;
-
-    wire [7:0] M_AXIS_S2MM_STS_0_tdata;
-    wire [0:0] M_AXIS_S2MM_STS_0_tkeep;
-    wire       M_AXIS_S2MM_STS_0_tlast;
-    wire       M_AXIS_S2MM_STS_0_tvalid;
-    wire       M_AXIS_S2MM_STS_0_tready;
-
 
     // BRAM access
     task ctl_bram_access(input logic[31:0] addr, input logic [31:0] data, input logic wr_rd_n);
         BRAM_PORTB_0_addr <= addr;
         BRAM_PORTB_0_en   <= 1'b1;
-        BRAM_PORTB_0_we   <= {3{wr_rd_n}};
+        BRAM_PORTB_0_we   <= {4{wr_rd_n}};
         BRAM_PORTB_0_din  <= (wr_rd_n==1'b1) ? data : 32'h0;
     endtask : ctl_bram_access
 
     task dma_bram_access(input logic[31:0] addr, input logic [31:0] data, input logic wr_rd_n);
         BRAM_PORTB_1_addr <= addr;
         BRAM_PORTB_1_en   <= 1'b1;
-        BRAM_PORTB_1_we   <= {3{wr_rd_n}};
+        BRAM_PORTB_1_we   <= {4{wr_rd_n}};
         BRAM_PORTB_1_din  <= (wr_rd_n==1'b1) ? data : 32'h0;
     endtask : dma_bram_access
 
 
     // Settings Loading
-    typedef enum {E_WR_READY, E_RD_READY, E_ACK, E_LOAD} t_state;
+    typedef enum {E_WR_INIT, E_RD_READY, E_START_ACK, E_WR_READY, E_LOAD, E_DONE_ACK} t_state;
     t_state state;
 
     logic[31:0] ctl_reg;
@@ -146,55 +87,77 @@ module top#(SIM=0)
 
     logic load_done;
 
+    logic rd_q;
+    logic[31:0] r_addr_q;
+
+    // rd_valid pipelining
+    always_ff@(posedge pl_clk0) begin
+        rd_q        <= BRAM_PORTB_0_en & !(|BRAM_PORTB_0_we[3:0]);
+        r_addr_q    <= BRAM_PORTB_0_addr;
+    end
+
     always_ff@(posedge pl_clk0) begin
         if(!aresetn) begin
-            state           <= E_WR_READY;
+            state           <= E_WR_INIT;
             BRAM_PORTB_0_en <= 1'b0;
             BRAM_PORTB_0_we <= 1'b0;
             load_done       <= 1'b0;
         end
         else begin
             // control lines to default values
+            BRAM_PORTB_0_we <= 4'b0;
             BRAM_PORTB_0_en <= 1'b0;
-            BRAM_PORTB_0_we <= 1'b0;
             load_done       <= 1'b0;
             temp_addr       <= 32'h0;
 
             case (state)
-                E_WR_READY: begin
-                    ctl_bram_access(32'h0, 32'h1, 1'b1);
+                E_WR_INIT: begin
+                    // initialize the BRAM
+                    ctl_bram_access(CTL_REG_ADDR, 32'h1, MEM_WR);
                     state <= E_RD_READY;
                 end
                 E_RD_READY: begin
-                    // read access latency is set to 1 cycle
-                    ctl_bram_access(32'h0, 32'h0, 1'b0);
-                    state <= E_ACK;
+                    ctl_bram_access(CTL_REG_ADDR, 32'h0, MEM_RD);
+                    if(rd_q) state <= E_START_ACK;
                 end
-                E_ACK: begin
-                    if(BRAM_PORTB_0_dout[1:0] == 2'b11) state <= E_LOAD;
-                    // back to E_WR_READY:
-                    // after a Power-Cycle software zero initializes the BRAM
-                    // during operation, software may not have loaded new settings
-                    else state <= E_WR_READY;
+                E_START_ACK: begin
+                    // SW <-> PL Handshake
+                    if(ctl_reg[1:0] == 2'b11) begin
+                        state <= E_LOAD;
+                        // clear the PL-bit until we are ready again
+                        ctl_bram_access(CTL_REG_ADDR, (ctl_reg ^ 1'b1), MEM_WR);
+                    end
+                    // SW zero initialized the BRAM, need to set PL bit again
+                    else if(ctl_reg[0] == 1'b0) state <= E_WR_READY;
+                    // keep polling for SW bit
+                    else state <= E_RD_READY;
+                end
+                E_WR_READY: begin
+                    ctl_bram_access(CTL_REG_ADDR, (ctl_reg | 1'b1), MEM_WR);
+                    state <= E_RD_READY;
                 end
                 E_LOAD: begin
-                    ctl_bram_access(temp_addr, 32'h0, 1'b1);
-                    temp_addr <= temp_addr + 4;
+                    ctl_bram_access(temp_addr, 32'h0, MEM_RD);
+                    temp_addr <= (temp_addr < 8) ? temp_addr + 4 : 8;
                     // last word read at this cycle
-                    if(BRAM_PORTB_0_addr==32'h8 && !BRAM_PORTB_0_we && BRAM_PORTB_0_en) begin
-                        state     <= E_WR_READY;
+                    if(r_addr_q==32'h8 && rd_q) begin
+                        state     <= E_DONE_ACK;
                         load_done <= 1'b1;
                     end
                 end
-                default: state <= E_WR_READY;
+                E_DONE_ACK: begin
+                    if(rd_q && r_addr_q == CTL_REG_ADDR && !BRAM_PORTB_0_dout[1]) state <= E_WR_READY;
+                    else ctl_bram_access(CTL_REG_ADDR, 32'h0, MEM_RD);
+                end
+                default: state <= E_WR_INIT;
             endcase
         end
     end
 
     always_ff@(posedge pl_clk0) begin
         if(aresetn) begin
-            if(!BRAM_PORTB_0_we && BRAM_PORTB_0_en) begin
-                case (BRAM_PORTB_0_addr)
+            if(rd_q) begin
+                case (r_addr_q)
                     32'h0: ctl_reg    <= BRAM_PORTB_0_dout;
                     32'h4: dma_reg_LO <= BRAM_PORTB_0_dout;
                     32'h8: dma_reg_HI <= BRAM_PORTB_0_dout;
@@ -208,6 +171,8 @@ module top#(SIM=0)
 
     always_ff@(posedge pl_clk0) begin
         S_AXIS_S2MM_CMD_0_tvalid <= 1'b0;
+        BRAM_PORTB_1_we <= 4'b0;
+        BRAM_PORTB_1_en <= 1'b0;
 
         if(load_done) s2mm_cmd_reg <={CMD_TAG, XUSER_DEFAULT, XCACHE_CACHEABLE, dma_reg_HI, dma_reg_LO, 32'h0};
         if(pl_ps_irq1_0) begin
@@ -224,8 +189,9 @@ module top#(SIM=0)
     logic init_done;
     always_ff@(posedge pl_clk0) begin
         if(!aresetn) begin
-            pl_ps_irq1_0 <= 1'b0;
-            init_done    <= 1'b0;
+            pl_ps_irq1_0         <= 1'b0;
+            init_done            <= 1'b0;
+            S_AXIS_S2MM_0_tvalid <= 1'b0;
         end
         else begin
             // default values
@@ -253,173 +219,238 @@ module top#(SIM=0)
 
     // MPSOC BD
     generate
-    if(SIM==0) begin : mpsoc_bd
-        mpsoc_bd mpsoc_bd_i
-        (.aresetn(aresetn),
-            .bus_struct_reset_0(bus_struct_reset_0),
-            .BRAM_PORTB_0_addr(BRAM_PORTB_0_addr),
-            .BRAM_PORTB_0_clk(pl_clk0),
-            .BRAM_PORTB_0_din(BRAM_PORTB_0_din),
-            .BRAM_PORTB_0_dout(BRAM_PORTB_0_dout),
-            .BRAM_PORTB_0_en(BRAM_PORTB_0_en),
-            .BRAM_PORTB_0_rst(bus_struct_reset_0),
-            .BRAM_PORTB_0_we(BRAM_PORTB_0_we),
-            // DMA Descriptor BRAM
-            .pl_ps_irq1_0(pl_ps_irq1_0),
-            .BRAM_PORTB_1_addr(BRAM_PORTB_1_addr),
-            .BRAM_PORTB_1_clk(pl_clk0),
-            .BRAM_PORTB_1_din(BRAM_PORTB_1_din),
-            .BRAM_PORTB_1_dout(BRAM_PORTB_1_dout),
-            .BRAM_PORTB_1_en(BRAM_PORTB_1_en),
-            .BRAM_PORTB_1_rst(bus_struct_reset_0),
-            .BRAM_PORTB_1_we(BRAM_PORTB_1_we),
-            //
-            .S_AXIS_S2MM_0_tdata(S_AXIS_S2MM_0_tdata),
-            .S_AXIS_S2MM_0_tkeep(S_AXIS_S2MM_0_tkeep),
-            .S_AXIS_S2MM_0_tlast(S_AXIS_S2MM_0_tlast),
-            .S_AXIS_S2MM_0_tready(S_AXIS_S2MM_0_tready),
-            .S_AXIS_S2MM_0_tvalid(S_AXIS_S2MM_0_tvalid),
-            .S_AXIS_S2MM_CMD_0_tdata(S_AXIS_S2MM_CMD_0_tdata),
-            .S_AXIS_S2MM_CMD_0_tready(S_AXIS_S2MM_CMD_0_tready),
-            .S_AXIS_S2MM_CMD_0_tvalid(S_AXIS_S2MM_CMD_0_tvalid),
-            .pl_clk0(pl_clk0),
-            .saxigp0_arprot_0(AX_PROT),
-            .saxigp0_awprot_0(AX_PROT),
-            .tempsensor_i2c_pl_scl_i(tempsensor_i2c_pl_scl_i),
-            .tempsensor_i2c_pl_scl_o(tempsensor_i2c_pl_scl_o),
-            .tempsensor_i2c_pl_scl_t(tempsensor_i2c_pl_scl_t),
-            .tempsensor_i2c_pl_sda_i(tempsensor_i2c_pl_sda_i),
-            .tempsensor_i2c_pl_sda_o(tempsensor_i2c_pl_sda_o),
-            .tempsensor_i2c_pl_sda_t(tempsensor_i2c_pl_sda_t));
+        if(SIM==0) begin : mpsoc_bd
+            mpsoc_bd mpsoc_bd_i
+            (.aresetn(aresetn),
+                .bus_struct_reset_0(bus_struct_reset_0),
+                .BRAM_PORTB_0_addr(BRAM_PORTB_0_addr),
+                .BRAM_PORTB_0_clk(pl_clk0),
+                .BRAM_PORTB_0_din(BRAM_PORTB_0_din),
+                .BRAM_PORTB_0_dout(BRAM_PORTB_0_dout),
+                .BRAM_PORTB_0_en(BRAM_PORTB_0_en),
+                .BRAM_PORTB_0_rst(bus_struct_reset_0),
+                .BRAM_PORTB_0_we(BRAM_PORTB_0_we),
+                // DMA Descriptor BRAM
+                .pl_ps_irq1_0(pl_ps_irq1_0),
+                .BRAM_PORTB_1_addr(BRAM_PORTB_1_addr),
+                .BRAM_PORTB_1_clk(pl_clk0),
+                .BRAM_PORTB_1_din(BRAM_PORTB_1_din),
+                .BRAM_PORTB_1_dout(BRAM_PORTB_1_dout),
+                .BRAM_PORTB_1_en(BRAM_PORTB_1_en),
+                .BRAM_PORTB_1_rst(bus_struct_reset_0),
+                .BRAM_PORTB_1_we(BRAM_PORTB_1_we),
+                //
+                .S_AXIS_S2MM_0_tdata(S_AXIS_S2MM_0_tdata),
+                .S_AXIS_S2MM_0_tkeep(S_AXIS_S2MM_0_tkeep),
+                .S_AXIS_S2MM_0_tlast(S_AXIS_S2MM_0_tlast),
+                .S_AXIS_S2MM_0_tready(S_AXIS_S2MM_0_tready),
+                .S_AXIS_S2MM_0_tvalid(S_AXIS_S2MM_0_tvalid),
+                .S_AXIS_S2MM_CMD_0_tdata(S_AXIS_S2MM_CMD_0_tdata),
+                .S_AXIS_S2MM_CMD_0_tready(S_AXIS_S2MM_CMD_0_tready),
+                .S_AXIS_S2MM_CMD_0_tvalid(S_AXIS_S2MM_CMD_0_tvalid),
+                .pl_clk0(pl_clk0),
+                .saxigp0_arprot_0(AX_PROT),
+                .saxigp0_awprot_0(AX_PROT),
+                .tempsensor_i2c_pl_scl_i(tempsensor_i2c_pl_scl_i),
+                .tempsensor_i2c_pl_scl_o(tempsensor_i2c_pl_scl_o),
+                .tempsensor_i2c_pl_scl_t(tempsensor_i2c_pl_scl_t),
+                .tempsensor_i2c_pl_sda_i(tempsensor_i2c_pl_sda_i),
+                .tempsensor_i2c_pl_sda_o(tempsensor_i2c_pl_sda_o),
+                .tempsensor_i2c_pl_sda_t(tempsensor_i2c_pl_sda_t));
 
-        // I2C I/O BUFs
-        IOBUF tempsensor_i2c_pl_scl_iobuf
-        (.I(tempsensor_i2c_pl_scl_o),
-            .IO(tempsensor_i2c_pl_scl_io),
-            .O(tempsensor_i2c_pl_scl_i),
-            .T(tempsensor_i2c_pl_scl_t));
+            // I2C I/O BUFs
+            IOBUF tempsensor_i2c_pl_scl_iobuf
+            (.I(tempsensor_i2c_pl_scl_o),
+                .IO(tempsensor_i2c_pl_scl_io),
+                .O(tempsensor_i2c_pl_scl_i),
+                .T(tempsensor_i2c_pl_scl_t));
 
-        IOBUF tempsensor_i2c_pl_sda_iobuf
-        (.I(tempsensor_i2c_pl_sda_o),
-            .IO(tempsensor_i2c_pl_sda_io),
-            .O(tempsensor_i2c_pl_sda_i),
-            .T(tempsensor_i2c_pl_sda_t));
-    end
-    else begin : sim_mpsoc_bd
-        sim_mpsco_bd sim_mpsco_bd_i
-        (.BRAM_PORTB_0_addr(BRAM_PORTB_0_addr),
-            .BRAM_PORTB_0_clk(pl_clk0),
-            .BRAM_PORTB_0_din(BRAM_PORTB_0_din),
-            .BRAM_PORTB_0_dout(BRAM_PORTB_0_dout),
-            .BRAM_PORTB_0_en(BRAM_PORTB_0_en),
-            .BRAM_PORTB_0_rst(bus_struct_reset_0),
-            .BRAM_PORTB_0_we(BRAM_PORTB_0_we),
-            .BRAM_PORTB_1_addr(BRAM_PORTB_1_addr),
-            .BRAM_PORTB_1_clk(pl_clk0),
-            .BRAM_PORTB_1_din(BRAM_PORTB_1_din),
-            .BRAM_PORTB_1_dout(BRAM_PORTB_1_dout),
-            .BRAM_PORTB_1_en(BRAM_PORTB_1_en),
-            .BRAM_PORTB_1_rst(bus_struct_reset_0),
-            .BRAM_PORTB_1_we(BRAM_PORTB_1_we),
-            .M_AXIS_S2MM_STS_0_tdata(M_AXIS_S2MM_STS_0_tdata),
-            .M_AXIS_S2MM_STS_0_tkeep(M_AXIS_S2MM_STS_0_tkeep),
-            .M_AXIS_S2MM_STS_0_tlast(M_AXIS_S2MM_STS_0_tlast),
-            .M_AXIS_S2MM_STS_0_tready(M_AXIS_S2MM_STS_0_tready),
-            .M_AXIS_S2MM_STS_0_tvalid(M_AXIS_S2MM_STS_0_tvalid),
-            .M_AXI_S2MM_0_awaddr(M_AXI_S2MM_0_awaddr),
-            .M_AXI_S2MM_0_awburst(M_AXI_S2MM_0_awburst),
-            .M_AXI_S2MM_0_awcache(M_AXI_S2MM_0_awcache),
-            .M_AXI_S2MM_0_awid(M_AXI_S2MM_0_awid),
-            .M_AXI_S2MM_0_awlen(M_AXI_S2MM_0_awlen),
-            .M_AXI_S2MM_0_awprot(M_AXI_S2MM_0_awprot),
-            .M_AXI_S2MM_0_awready(M_AXI_S2MM_0_awready),
-            .M_AXI_S2MM_0_awsize(M_AXI_S2MM_0_awsize),
-            .M_AXI_S2MM_0_awuser(M_AXI_S2MM_0_awuser),
-            .M_AXI_S2MM_0_awvalid(M_AXI_S2MM_0_awvalid),
-            .M_AXI_S2MM_0_bready(M_AXI_S2MM_0_bready),
-            .M_AXI_S2MM_0_bresp(M_AXI_S2MM_0_bresp),
-            .M_AXI_S2MM_0_bvalid(M_AXI_S2MM_0_bvalid),
-            .M_AXI_S2MM_0_wdata(M_AXI_S2MM_0_wdata),
-            .M_AXI_S2MM_0_wlast(M_AXI_S2MM_0_wlast),
-            .M_AXI_S2MM_0_wready(M_AXI_S2MM_0_wready),
-            .M_AXI_S2MM_0_wstrb(M_AXI_S2MM_0_wstrb),
-            .M_AXI_S2MM_0_wvalid(M_AXI_S2MM_0_wvalid),
-            .S_AXIS_S2MM_0_tdata(S_AXIS_S2MM_0_tdata),
-            .S_AXIS_S2MM_0_tkeep(S_AXIS_S2MM_0_tkeep),
-            .S_AXIS_S2MM_0_tlast(S_AXIS_S2MM_0_tlast),
-            .S_AXIS_S2MM_0_tready(S_AXIS_S2MM_0_tready),
-            .S_AXIS_S2MM_0_tvalid(S_AXIS_S2MM_0_tvalid),
-            .S_AXIS_S2MM_CMD_0_tdata(S_AXIS_S2MM_CMD_0_tdata),
-            .S_AXIS_S2MM_CMD_0_tready(S_AXIS_S2MM_CMD_0_tready),
-            .S_AXIS_S2MM_CMD_0_tvalid(S_AXIS_S2MM_CMD_0_tvalid),
-            .S_AXI_BRAM_0_araddr(S_AXI_BRAM_0_araddr),
-            .S_AXI_BRAM_0_arburst(S_AXI_BRAM_0_arburst),
-            .S_AXI_BRAM_0_arcache(S_AXI_BRAM_0_arcache),
-            .S_AXI_BRAM_0_arlen(S_AXI_BRAM_0_arlen),
-            .S_AXI_BRAM_0_arlock(S_AXI_BRAM_0_arlock),
-            .S_AXI_BRAM_0_arprot(S_AXI_BRAM_0_arprot),
-            .S_AXI_BRAM_0_arready(S_AXI_BRAM_0_arready),
-            .S_AXI_BRAM_0_arsize(S_AXI_BRAM_0_arsize),
-            .S_AXI_BRAM_0_arvalid(S_AXI_BRAM_0_arvalid),
-            .S_AXI_BRAM_0_awaddr(S_AXI_BRAM_0_awaddr),
-            .S_AXI_BRAM_0_awburst(S_AXI_BRAM_0_awburst),
-            .S_AXI_BRAM_0_awcache(S_AXI_BRAM_0_awcache),
-            .S_AXI_BRAM_0_awlen(S_AXI_BRAM_0_awlen),
-            .S_AXI_BRAM_0_awlock(S_AXI_BRAM_0_awlock),
-            .S_AXI_BRAM_0_awprot(S_AXI_BRAM_0_awprot),
-            .S_AXI_BRAM_0_awready(S_AXI_BRAM_0_awready),
-            .S_AXI_BRAM_0_awsize(S_AXI_BRAM_0_awsize),
-            .S_AXI_BRAM_0_awvalid(S_AXI_BRAM_0_awvalid),
-            .S_AXI_BRAM_0_bready(S_AXI_BRAM_0_bready),
-            .S_AXI_BRAM_0_bresp(S_AXI_BRAM_0_bresp),
-            .S_AXI_BRAM_0_bvalid(S_AXI_BRAM_0_bvalid),
-            .S_AXI_BRAM_0_rdata(S_AXI_BRAM_0_rdata),
-            .S_AXI_BRAM_0_rlast(S_AXI_BRAM_0_rlast),
-            .S_AXI_BRAM_0_rready(S_AXI_BRAM_0_rready),
-            .S_AXI_BRAM_0_rresp(S_AXI_BRAM_0_rresp),
-            .S_AXI_BRAM_0_rvalid(S_AXI_BRAM_0_rvalid),
-            .S_AXI_BRAM_0_wdata(S_AXI_BRAM_0_wdata),
-            .S_AXI_BRAM_0_wlast(S_AXI_BRAM_0_wlast),
-            .S_AXI_BRAM_0_wready(S_AXI_BRAM_0_wready),
-            .S_AXI_BRAM_0_wstrb(S_AXI_BRAM_0_wstrb),
-            .S_AXI_BRAM_0_wvalid(S_AXI_BRAM_0_wvalid),
-            .S_AXI_BRAM_1_araddr(S_AXI_BRAM_1_araddr),
-            .S_AXI_BRAM_1_arburst(S_AXI_BRAM_1_arburst),
-            .S_AXI_BRAM_1_arcache(S_AXI_BRAM_1_arcache),
-            .S_AXI_BRAM_1_arlen(S_AXI_BRAM_1_arlen),
-            .S_AXI_BRAM_1_arlock(S_AXI_BRAM_1_arlock),
-            .S_AXI_BRAM_1_arprot(S_AXI_BRAM_1_arprot),
-            .S_AXI_BRAM_1_arready(S_AXI_BRAM_1_arready),
-            .S_AXI_BRAM_1_arsize(S_AXI_BRAM_1_arsize),
-            .S_AXI_BRAM_1_arvalid(S_AXI_BRAM_1_arvalid),
-            .S_AXI_BRAM_1_awaddr(S_AXI_BRAM_1_awaddr),
-            .S_AXI_BRAM_1_awburst(S_AXI_BRAM_1_awburst),
-            .S_AXI_BRAM_1_awcache(S_AXI_BRAM_1_awcache),
-            .S_AXI_BRAM_1_awlen(S_AXI_BRAM_1_awlen),
-            .S_AXI_BRAM_1_awlock(S_AXI_BRAM_1_awlock),
-            .S_AXI_BRAM_1_awprot(S_AXI_BRAM_1_awprot),
-            .S_AXI_BRAM_1_awready(S_AXI_BRAM_1_awready),
-            .S_AXI_BRAM_1_awsize(S_AXI_BRAM_1_awsize),
-            .S_AXI_BRAM_1_awvalid(S_AXI_BRAM_1_awvalid),
-            .S_AXI_BRAM_1_bready(S_AXI_BRAM_1_bready),
-            .S_AXI_BRAM_1_bresp(S_AXI_BRAM_1_bresp),
-            .S_AXI_BRAM_1_bvalid(S_AXI_BRAM_1_bvalid),
-            .S_AXI_BRAM_1_rdata(S_AXI_BRAM_1_rdata),
-            .S_AXI_BRAM_1_rlast(S_AXI_BRAM_1_rlast),
-            .S_AXI_BRAM_1_rready(S_AXI_BRAM_1_rready),
-            .S_AXI_BRAM_1_rresp(S_AXI_BRAM_1_rresp),
-            .S_AXI_BRAM_1_rvalid(S_AXI_BRAM_1_rvalid),
-            .S_AXI_BRAM_1_wdata(S_AXI_BRAM_1_wdata),
-            .S_AXI_BRAM_1_wlast(S_AXI_BRAM_1_wlast),
-            .S_AXI_BRAM_1_wready(S_AXI_BRAM_1_wready),
-            .S_AXI_BRAM_1_wstrb(S_AXI_BRAM_1_wstrb),
-            .S_AXI_BRAM_1_wvalid(S_AXI_BRAM_1_wvalid),
-            .aresetn(aresetn),
-            .bus_struct_reset_0(bus_struct_reset_0),
-            .clk_100MHz(clk_100MHz),
-            .n_reset_rtl(n_reset_rtl),
-            .pl_clk0(pl_clk0),
-            .reset_rtl(reset_rtl));
-    end
+            IOBUF tempsensor_i2c_pl_sda_iobuf
+            (.I(tempsensor_i2c_pl_sda_o),
+                .IO(tempsensor_i2c_pl_sda_io),
+                .O(tempsensor_i2c_pl_sda_i),
+                .T(tempsensor_i2c_pl_sda_t));
+        end
+        else begin : sim_mpsoc_bd
+            // Simulation BD only. In the real design these sit inside mpsoc_bd
+            // (A53 masters, HPC0, PS clocks); the sim BD exposes them so the
+            // testbench (hw/sim) can drive and observe them as sim_mpsoc_bd.<name>.
+            wire clk_100MHz;
+            wire reset_rtl;
+            wire n_reset_rtl;
+
+            wire [11:0]S_AXI_BRAM_0_awaddr;  wire [11:0]S_AXI_BRAM_1_awaddr;
+            wire [7:0] S_AXI_BRAM_0_awlen;   wire [7:0] S_AXI_BRAM_1_awlen;
+            wire [2:0] S_AXI_BRAM_0_awsize;  wire [2:0] S_AXI_BRAM_1_awsize;
+            wire [1:0] S_AXI_BRAM_0_awburst; wire [1:0] S_AXI_BRAM_1_awburst;
+            wire       S_AXI_BRAM_0_awlock;  wire       S_AXI_BRAM_1_awlock;
+            wire [3:0] S_AXI_BRAM_0_awcache; wire [3:0] S_AXI_BRAM_1_awcache;
+            wire [2:0] S_AXI_BRAM_0_awprot;  wire [2:0] S_AXI_BRAM_1_awprot;
+            wire       S_AXI_BRAM_0_awvalid; wire       S_AXI_BRAM_1_awvalid;
+            wire       S_AXI_BRAM_0_awready; wire       S_AXI_BRAM_1_awready;
+            wire [31:0]S_AXI_BRAM_0_wdata;   wire [31:0]S_AXI_BRAM_1_wdata;
+            wire [3:0] S_AXI_BRAM_0_wstrb;   wire [3:0] S_AXI_BRAM_1_wstrb;
+            wire       S_AXI_BRAM_0_wlast;   wire       S_AXI_BRAM_1_wlast;
+            wire       S_AXI_BRAM_0_wvalid;  wire       S_AXI_BRAM_1_wvalid;
+            wire       S_AXI_BRAM_0_wready;  wire       S_AXI_BRAM_1_wready;
+            wire [1:0] S_AXI_BRAM_0_bresp;   wire [1:0] S_AXI_BRAM_1_bresp;
+            wire       S_AXI_BRAM_0_bvalid;  wire       S_AXI_BRAM_1_bvalid;
+            wire       S_AXI_BRAM_0_bready;  wire       S_AXI_BRAM_1_bready;
+            wire [11:0]S_AXI_BRAM_0_araddr;  wire [11:0]S_AXI_BRAM_1_araddr;
+            wire [7:0] S_AXI_BRAM_0_arlen;   wire [7:0] S_AXI_BRAM_1_arlen;
+            wire [2:0] S_AXI_BRAM_0_arsize;  wire [2:0] S_AXI_BRAM_1_arsize;
+            wire [1:0] S_AXI_BRAM_0_arburst; wire [1:0] S_AXI_BRAM_1_arburst;
+            wire       S_AXI_BRAM_0_arlock;  wire       S_AXI_BRAM_1_arlock;
+            wire [3:0] S_AXI_BRAM_0_arcache; wire [3:0] S_AXI_BRAM_1_arcache;
+            wire [2:0] S_AXI_BRAM_0_arprot;  wire [2:0] S_AXI_BRAM_1_arprot;
+            wire       S_AXI_BRAM_0_arvalid; wire       S_AXI_BRAM_1_arvalid;
+            wire       S_AXI_BRAM_0_arready; wire       S_AXI_BRAM_1_arready;
+            wire [31:0]S_AXI_BRAM_0_rdata;   wire [31:0]S_AXI_BRAM_1_rdata;
+            wire [1:0] S_AXI_BRAM_0_rresp;   wire [1:0] S_AXI_BRAM_1_rresp;
+            wire       S_AXI_BRAM_0_rlast;   wire       S_AXI_BRAM_1_rlast;
+            wire       S_AXI_BRAM_0_rvalid;  wire       S_AXI_BRAM_1_rvalid;
+            wire       S_AXI_BRAM_0_rready;  wire       S_AXI_BRAM_1_rready;
+
+            wire [3:0] M_AXI_S2MM_0_awid;
+            wire [31:0]M_AXI_S2MM_0_awaddr;
+            wire [7:0] M_AXI_S2MM_0_awlen;
+            wire [2:0] M_AXI_S2MM_0_awsize;
+            wire [1:0] M_AXI_S2MM_0_awburst;
+            wire [3:0] M_AXI_S2MM_0_awcache;
+            wire [2:0] M_AXI_S2MM_0_awprot;
+            wire [3:0] M_AXI_S2MM_0_awuser;
+            wire       M_AXI_S2MM_0_awvalid;
+            wire       M_AXI_S2MM_0_awready;
+            wire [31:0]M_AXI_S2MM_0_wdata;
+            wire [3:0] M_AXI_S2MM_0_wstrb;
+            wire       M_AXI_S2MM_0_wlast;
+            wire       M_AXI_S2MM_0_wvalid;
+            wire       M_AXI_S2MM_0_wready;
+            wire [1:0] M_AXI_S2MM_0_bresp;
+            wire       M_AXI_S2MM_0_bvalid;
+            wire       M_AXI_S2MM_0_bready;
+
+            wire [7:0] M_AXIS_S2MM_STS_0_tdata;
+            wire [0:0] M_AXIS_S2MM_STS_0_tkeep;
+            wire       M_AXIS_S2MM_STS_0_tlast;
+            wire       M_AXIS_S2MM_STS_0_tvalid;
+            wire       M_AXIS_S2MM_STS_0_tready;
+
+            sim_mpsco_bd sim_mpsco_bd_i
+            (.BRAM_PORTB_0_addr(BRAM_PORTB_0_addr),
+                .BRAM_PORTB_0_clk(pl_clk0),
+                .BRAM_PORTB_0_din(BRAM_PORTB_0_din),
+                .BRAM_PORTB_0_dout(BRAM_PORTB_0_dout),
+                .BRAM_PORTB_0_en(BRAM_PORTB_0_en),
+                .BRAM_PORTB_0_rst(bus_struct_reset_0),
+                .BRAM_PORTB_0_we(BRAM_PORTB_0_we),
+                .BRAM_PORTB_1_addr(BRAM_PORTB_1_addr),
+                .BRAM_PORTB_1_clk(pl_clk0),
+                .BRAM_PORTB_1_din(BRAM_PORTB_1_din),
+                .BRAM_PORTB_1_dout(BRAM_PORTB_1_dout),
+                .BRAM_PORTB_1_en(BRAM_PORTB_1_en),
+                .BRAM_PORTB_1_rst(bus_struct_reset_0),
+                .BRAM_PORTB_1_we(BRAM_PORTB_1_we),
+                .M_AXIS_S2MM_STS_0_tdata(M_AXIS_S2MM_STS_0_tdata),
+                .M_AXIS_S2MM_STS_0_tkeep(M_AXIS_S2MM_STS_0_tkeep),
+                .M_AXIS_S2MM_STS_0_tlast(M_AXIS_S2MM_STS_0_tlast),
+                .M_AXIS_S2MM_STS_0_tready(M_AXIS_S2MM_STS_0_tready),
+                .M_AXIS_S2MM_STS_0_tvalid(M_AXIS_S2MM_STS_0_tvalid),
+                .M_AXI_S2MM_0_awaddr(M_AXI_S2MM_0_awaddr),
+                .M_AXI_S2MM_0_awburst(M_AXI_S2MM_0_awburst),
+                .M_AXI_S2MM_0_awcache(M_AXI_S2MM_0_awcache),
+                .M_AXI_S2MM_0_awid(M_AXI_S2MM_0_awid),
+                .M_AXI_S2MM_0_awlen(M_AXI_S2MM_0_awlen),
+                .M_AXI_S2MM_0_awprot(M_AXI_S2MM_0_awprot),
+                .M_AXI_S2MM_0_awready(M_AXI_S2MM_0_awready),
+                .M_AXI_S2MM_0_awsize(M_AXI_S2MM_0_awsize),
+                .M_AXI_S2MM_0_awuser(M_AXI_S2MM_0_awuser),
+                .M_AXI_S2MM_0_awvalid(M_AXI_S2MM_0_awvalid),
+                .M_AXI_S2MM_0_bready(M_AXI_S2MM_0_bready),
+                .M_AXI_S2MM_0_bresp(M_AXI_S2MM_0_bresp),
+                .M_AXI_S2MM_0_bvalid(M_AXI_S2MM_0_bvalid),
+                .M_AXI_S2MM_0_wdata(M_AXI_S2MM_0_wdata),
+                .M_AXI_S2MM_0_wlast(M_AXI_S2MM_0_wlast),
+                .M_AXI_S2MM_0_wready(M_AXI_S2MM_0_wready),
+                .M_AXI_S2MM_0_wstrb(M_AXI_S2MM_0_wstrb),
+                .M_AXI_S2MM_0_wvalid(M_AXI_S2MM_0_wvalid),
+                .S_AXIS_S2MM_0_tdata(S_AXIS_S2MM_0_tdata),
+                .S_AXIS_S2MM_0_tkeep(S_AXIS_S2MM_0_tkeep),
+                .S_AXIS_S2MM_0_tlast(S_AXIS_S2MM_0_tlast),
+                .S_AXIS_S2MM_0_tready(S_AXIS_S2MM_0_tready),
+                .S_AXIS_S2MM_0_tvalid(S_AXIS_S2MM_0_tvalid),
+                .S_AXIS_S2MM_CMD_0_tdata(S_AXIS_S2MM_CMD_0_tdata),
+                .S_AXIS_S2MM_CMD_0_tready(S_AXIS_S2MM_CMD_0_tready),
+                .S_AXIS_S2MM_CMD_0_tvalid(S_AXIS_S2MM_CMD_0_tvalid),
+                .S_AXI_BRAM_0_araddr(S_AXI_BRAM_0_araddr),
+                .S_AXI_BRAM_0_arburst(S_AXI_BRAM_0_arburst),
+                .S_AXI_BRAM_0_arcache(S_AXI_BRAM_0_arcache),
+                .S_AXI_BRAM_0_arlen(S_AXI_BRAM_0_arlen),
+                .S_AXI_BRAM_0_arlock(S_AXI_BRAM_0_arlock),
+                .S_AXI_BRAM_0_arprot(S_AXI_BRAM_0_arprot),
+                .S_AXI_BRAM_0_arready(S_AXI_BRAM_0_arready),
+                .S_AXI_BRAM_0_arsize(S_AXI_BRAM_0_arsize),
+                .S_AXI_BRAM_0_arvalid(S_AXI_BRAM_0_arvalid),
+                .S_AXI_BRAM_0_awaddr(S_AXI_BRAM_0_awaddr),
+                .S_AXI_BRAM_0_awburst(S_AXI_BRAM_0_awburst),
+                .S_AXI_BRAM_0_awcache(S_AXI_BRAM_0_awcache),
+                .S_AXI_BRAM_0_awlen(S_AXI_BRAM_0_awlen),
+                .S_AXI_BRAM_0_awlock(S_AXI_BRAM_0_awlock),
+                .S_AXI_BRAM_0_awprot(S_AXI_BRAM_0_awprot),
+                .S_AXI_BRAM_0_awready(S_AXI_BRAM_0_awready),
+                .S_AXI_BRAM_0_awsize(S_AXI_BRAM_0_awsize),
+                .S_AXI_BRAM_0_awvalid(S_AXI_BRAM_0_awvalid),
+                .S_AXI_BRAM_0_bready(S_AXI_BRAM_0_bready),
+                .S_AXI_BRAM_0_bresp(S_AXI_BRAM_0_bresp),
+                .S_AXI_BRAM_0_bvalid(S_AXI_BRAM_0_bvalid),
+                .S_AXI_BRAM_0_rdata(S_AXI_BRAM_0_rdata),
+                .S_AXI_BRAM_0_rlast(S_AXI_BRAM_0_rlast),
+                .S_AXI_BRAM_0_rready(S_AXI_BRAM_0_rready),
+                .S_AXI_BRAM_0_rresp(S_AXI_BRAM_0_rresp),
+                .S_AXI_BRAM_0_rvalid(S_AXI_BRAM_0_rvalid),
+                .S_AXI_BRAM_0_wdata(S_AXI_BRAM_0_wdata),
+                .S_AXI_BRAM_0_wlast(S_AXI_BRAM_0_wlast),
+                .S_AXI_BRAM_0_wready(S_AXI_BRAM_0_wready),
+                .S_AXI_BRAM_0_wstrb(S_AXI_BRAM_0_wstrb),
+                .S_AXI_BRAM_0_wvalid(S_AXI_BRAM_0_wvalid),
+                .S_AXI_BRAM_1_araddr(S_AXI_BRAM_1_araddr),
+                .S_AXI_BRAM_1_arburst(S_AXI_BRAM_1_arburst),
+                .S_AXI_BRAM_1_arcache(S_AXI_BRAM_1_arcache),
+                .S_AXI_BRAM_1_arlen(S_AXI_BRAM_1_arlen),
+                .S_AXI_BRAM_1_arlock(S_AXI_BRAM_1_arlock),
+                .S_AXI_BRAM_1_arprot(S_AXI_BRAM_1_arprot),
+                .S_AXI_BRAM_1_arready(S_AXI_BRAM_1_arready),
+                .S_AXI_BRAM_1_arsize(S_AXI_BRAM_1_arsize),
+                .S_AXI_BRAM_1_arvalid(S_AXI_BRAM_1_arvalid),
+                .S_AXI_BRAM_1_awaddr(S_AXI_BRAM_1_awaddr),
+                .S_AXI_BRAM_1_awburst(S_AXI_BRAM_1_awburst),
+                .S_AXI_BRAM_1_awcache(S_AXI_BRAM_1_awcache),
+                .S_AXI_BRAM_1_awlen(S_AXI_BRAM_1_awlen),
+                .S_AXI_BRAM_1_awlock(S_AXI_BRAM_1_awlock),
+                .S_AXI_BRAM_1_awprot(S_AXI_BRAM_1_awprot),
+                .S_AXI_BRAM_1_awready(S_AXI_BRAM_1_awready),
+                .S_AXI_BRAM_1_awsize(S_AXI_BRAM_1_awsize),
+                .S_AXI_BRAM_1_awvalid(S_AXI_BRAM_1_awvalid),
+                .S_AXI_BRAM_1_bready(S_AXI_BRAM_1_bready),
+                .S_AXI_BRAM_1_bresp(S_AXI_BRAM_1_bresp),
+                .S_AXI_BRAM_1_bvalid(S_AXI_BRAM_1_bvalid),
+                .S_AXI_BRAM_1_rdata(S_AXI_BRAM_1_rdata),
+                .S_AXI_BRAM_1_rlast(S_AXI_BRAM_1_rlast),
+                .S_AXI_BRAM_1_rready(S_AXI_BRAM_1_rready),
+                .S_AXI_BRAM_1_rresp(S_AXI_BRAM_1_rresp),
+                .S_AXI_BRAM_1_rvalid(S_AXI_BRAM_1_rvalid),
+                .S_AXI_BRAM_1_wdata(S_AXI_BRAM_1_wdata),
+                .S_AXI_BRAM_1_wlast(S_AXI_BRAM_1_wlast),
+                .S_AXI_BRAM_1_wready(S_AXI_BRAM_1_wready),
+                .S_AXI_BRAM_1_wstrb(S_AXI_BRAM_1_wstrb),
+                .S_AXI_BRAM_1_wvalid(S_AXI_BRAM_1_wvalid),
+                .aresetn(aresetn),
+                .bus_struct_reset_0(bus_struct_reset_0),
+                .clk_100MHz(clk_100MHz),
+                .n_reset_rtl(n_reset_rtl),
+                .pl_clk0(pl_clk0),
+                .reset_rtl(reset_rtl));
+        end
+    endgenerate
 endmodule
 `default_nettype wire

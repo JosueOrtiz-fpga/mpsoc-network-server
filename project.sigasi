@@ -3,7 +3,9 @@
     "targets": {
         "rtl": {
             "libraryMapping": {
-                "": []
+                "": [],
+                "hw/rtl": "work",
+                "hw/sim/tb": "work"
             }
         }
     }
