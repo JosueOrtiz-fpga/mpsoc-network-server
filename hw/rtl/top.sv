@@ -11,10 +11,15 @@ module top#(SIM=0)
     localparam XUSER_DEFAULT    = 4'h0; // unused
     localparam CMD_TAG          = 8'h00; // unused
 
-    localparam PKT_LENGTH = 360;
+    localparam PKT_LEN_BYTES = 360;
+    localparam PKT_LEN_BEATS = 360 / 4; // 4 bytes per Data AXIS beat
 
-    // Address Map
+    // CTL BRAM Address Map
     localparam CTL_REG_ADDR = 32'h0;
+
+    // DMA BRAM Address Map
+    localparam DMA_DESC_BADDR = 32'h0;
+
     localparam logic MEM_RD = 1'b0;
     localparam logic MEM_WR = 1'b1;
 
@@ -31,6 +36,11 @@ module top#(SIM=0)
     logic [79:0]S_AXIS_S2MM_CMD_0_tdata;
     logic S_AXIS_S2MM_CMD_0_tready;
     logic S_AXIS_S2MM_CMD_0_tvalid;
+    logic [7:0]M_AXIS_S2MM_STS_0_tdata;
+    logic [0:0]M_AXIS_S2MM_STS_0_tkeep;
+    logic M_AXIS_S2MM_STS_0_tlast;
+    logic M_AXIS_S2MM_STS_0_tready;
+    logic M_AXIS_S2MM_STS_0_tvalid;
 
     // CTL BRAM
     logic [31:0]BRAM_PORTB_0_addr;
@@ -81,7 +91,7 @@ module top#(SIM=0)
     t_state state;
 
     logic[31:0] ctl_reg;
-    logic[31:0] dma_reg_LO;
+    logic[31:0] dma_ubuf_addr;
     logic[31:0] dma_reg_HI;
     logic[31:0] temp_addr;
 
@@ -158,60 +168,93 @@ module top#(SIM=0)
         if(aresetn) begin
             if(rd_q) begin
                 case (r_addr_q)
-                    32'h0: ctl_reg    <= BRAM_PORTB_0_dout;
-                    32'h4: dma_reg_LO <= BRAM_PORTB_0_dout;
-                    32'h8: dma_reg_HI <= BRAM_PORTB_0_dout;
+                    32'h0: ctl_reg       <= BRAM_PORTB_0_dout;
+                    32'h4: dma_ubuf_addr <= BRAM_PORTB_0_dout;
                 endcase
             end
         end
     end
 
     // DMA Loading
-    logic[79:0] s2mm_cmd_reg;
+    logic init_done;
+    logic first_cmd_queued;
+    logic[31:0] curr_ubuf_addr;
+    logic[9:0] p_idx; 
+    logic[9:0] c_idx;
 
     always_ff@(posedge pl_clk0) begin
-        S_AXIS_S2MM_CMD_0_tvalid <= 1'b0;
-        BRAM_PORTB_1_we <= 4'b0;
-        BRAM_PORTB_1_en <= 1'b0;
+        if(!aresetn) begin
+            S_AXIS_S2MM_CMD_0_tvalid <= 1'b0;
+            M_AXIS_S2MM_STS_0_tready <= 1'b0;
+            init_done                <= 1'b0;
+            first_cmd_queued         <= 1'b0;
+            BRAM_PORTB_1_we          <= 4'b0;
+            BRAM_PORTB_1_en          <= 1'b0;
+        end
+        else begin
 
-        if(load_done) s2mm_cmd_reg <={CMD_TAG, XUSER_DEFAULT, XCACHE_CACHEABLE, dma_reg_HI, dma_reg_LO, 32'h0};
-        if(pl_ps_irq1_0) begin
-            // assumes SW has zero initialized BRAM slot
-            // no backpressure support for now
-            S_AXIS_S2MM_CMD_0_tvalid <= 1'b1;
-            S_AXIS_S2MM_CMD_0_tdata <= s2mm_cmd_reg | 32'({1'b0, 1'b1, 6'h0, 1'b1, 23'(PKT_LENGTH)});
-            dma_bram_access(32'h0, {31'(PKT_LENGTH), 1'b1}, 1'b1);
+            // need to always be ready to receive datamover status
+            M_AXIS_S2MM_STS_0_tready <= 1'b1;
+
+            // initialization control
+            if(load_done) begin
+                init_done      <= 1'b1;
+                curr_ubuf_addr <= dma_ubuf_addr;
+            end
+
+            // queuing of first Data Mover command: assumes slot 0 is free upon init
+            if(init_done && !first_cmd_queued) begin
+                if(!S_AXIS_S2MM_CMD_0_tvalid) begin
+                    S_AXIS_S2MM_CMD_0_tvalid <= 1'b1;
+                    S_AXIS_S2MM_CMD_0_tdata  <={CMD_TAG, XUSER_DEFAULT, XCACHE_CACHEABLE, curr_ubuf_addr, 32'h0};
+                end
+                else if (S_AXIS_S2MM_CMD_0_tvalid && S_AXIS_S2MM_CMD_0_tready) begin
+                    S_AXIS_S2MM_CMD_0_tvalid <= 1'b0;
+                    first_cmd_queued         <= 1'b1;
+                end
+            end
+
+            // queueing of subsequent Data Mover commands at the end of prior packet
+            if(init_done && first_cmd_queued) begin
+                // AXIS Data Stream tlast
+                if(S_AXIS_S2MM_0_tvalid && S_AXIS_S2MM_0_tready && S_AXIS_S2MM_0_tlast) begin
+                    S_AXIS_S2MM_CMD_0_tvalid <= 1'b1;
+                    S_AXIS_S2MM_CMD_0_tdata  <={CMD_TAG, XUSER_DEFAULT, XCACHE_CACHEABLE, (curr_ubuf_addr + beat_count), 32'h0};
+                    curr_ubuf_addr           <= curr_ubuf_addr + beat_count;
+                end
+                // AXIS Command Handshake
+                if (S_AXIS_S2MM_CMD_0_tvalid && S_AXIS_S2MM_CMD_0_tready) begin
+                    S_AXIS_S2MM_CMD_0_tvalid <= 1'b0;
+                end
+            end
+
+            // TODO: DMA descriptor handling, p_idx, c_idx; assumption that those are consumed incremental / decremental order
         end
     end
 
     // Dummy Data generation
-    logic[22:0] byte_count;
-    logic init_done;
+    logic[6:0] beat_count;
     always_ff@(posedge pl_clk0) begin
         if(!aresetn) begin
             pl_ps_irq1_0         <= 1'b0;
-            init_done            <= 1'b0;
             S_AXIS_S2MM_0_tvalid <= 1'b0;
         end
         else begin
             // default values
             S_AXIS_S2MM_0_tkeep <= '1;
             S_AXIS_S2MM_0_tlast <= 1'b0;
-            byte_count          <= 0;
+            beat_count          <= 0;
             pl_ps_irq1_0        <= 1'b0;
-
-            // initialization control
-            if(load_done) init_done <= 1'b1;
 
             // dummy data doesn't stop
             if(init_done) begin
                 if(!S_AXIS_S2MM_0_tvalid || (S_AXIS_S2MM_0_tvalid && S_AXIS_S2MM_0_tready)) begin
                     S_AXIS_S2MM_0_tvalid <= 1'b1;
-                    S_AXIS_S2MM_0_tdata <= byte_count;
-                    S_AXIS_S2MM_0_tlast <= (byte_count ==PKT_LENGTH-1) ? 1'b1 : 1'b0;
+                    S_AXIS_S2MM_0_tdata <= beat_count;
+                    S_AXIS_S2MM_0_tlast <= (beat_count == PKT_LEN_BEATS-1) ? 1'b1 : 1'b0;
                     // Software to compensate for delay between TLAST and buffer available in DDR
                     pl_ps_irq1_0        <= S_AXIS_S2MM_0_tlast;
-                    byte_count          <= (byte_count ==PKT_LENGTH-1) ? 0 : byte_count + 1;
+                    beat_count          <= (beat_count == PKT_LEN_BEATS) ? 0 : beat_count + 1;
                 end
             end
         end
@@ -221,8 +264,9 @@ module top#(SIM=0)
     generate
         if(SIM==0) begin : mpsoc_bd
             mpsoc_bd mpsoc_bd_i
-            (.aresetn(aresetn),
+            (   .aresetn(aresetn),
                 .bus_struct_reset_0(bus_struct_reset_0),
+                // Control BRAM
                 .BRAM_PORTB_0_addr(BRAM_PORTB_0_addr),
                 .BRAM_PORTB_0_clk(pl_clk0),
                 .BRAM_PORTB_0_din(BRAM_PORTB_0_din),
@@ -239,15 +283,22 @@ module top#(SIM=0)
                 .BRAM_PORTB_1_en(BRAM_PORTB_1_en),
                 .BRAM_PORTB_1_rst(bus_struct_reset_0),
                 .BRAM_PORTB_1_we(BRAM_PORTB_1_we),
-                //
+                //Data Mover S_AXIS Data
                 .S_AXIS_S2MM_0_tdata(S_AXIS_S2MM_0_tdata),
                 .S_AXIS_S2MM_0_tkeep(S_AXIS_S2MM_0_tkeep),
                 .S_AXIS_S2MM_0_tlast(S_AXIS_S2MM_0_tlast),
                 .S_AXIS_S2MM_0_tready(S_AXIS_S2MM_0_tready),
                 .S_AXIS_S2MM_0_tvalid(S_AXIS_S2MM_0_tvalid),
+                //Data Mover S_AXIS Cmd
                 .S_AXIS_S2MM_CMD_0_tdata(S_AXIS_S2MM_CMD_0_tdata),
                 .S_AXIS_S2MM_CMD_0_tready(S_AXIS_S2MM_CMD_0_tready),
                 .S_AXIS_S2MM_CMD_0_tvalid(S_AXIS_S2MM_CMD_0_tvalid),
+                //
+                .M_AXIS_S2MM_STS_0_tdata(M_AXIS_S2MM_STS_0_tdata),
+                .M_AXIS_S2MM_STS_0_tkeep(M_AXIS_S2MM_STS_0_tkeep),
+                .M_AXIS_S2MM_STS_0_tlast(M_AXIS_S2MM_STS_0_tlast),
+                .M_AXIS_S2MM_STS_0_tready(M_AXIS_S2MM_STS_0_tready),
+                .M_AXIS_S2MM_STS_0_tvalid(M_AXIS_S2MM_STS_0_tvalid),
                 .pl_clk0(pl_clk0),
                 .saxigp0_arprot_0(AX_PROT),
                 .saxigp0_awprot_0(AX_PROT),

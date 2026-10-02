@@ -239,13 +239,15 @@ proc create_root_design { parentCell } {
    CONFIG.MASTER_TYPE {BRAM_CTRL} \
    ] $BRAM_PORTB_1
 
+  set M_AXIS_S2MM_STS_0 [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:axis_rtl:1.0 M_AXIS_S2MM_STS_0 ]
+
 
   # Create ports
   set saxigp0_awprot_0 [ create_bd_port -dir I -from 2 -to 0 saxigp0_awprot_0 ]
   set saxigp0_arprot_0 [ create_bd_port -dir I -from 2 -to 0 saxigp0_arprot_0 ]
   set pl_clk0 [ create_bd_port -dir O -type clk pl_clk0 ]
   set_property -dict [ list \
-   CONFIG.ASSOCIATED_BUSIF {S_AXIS_S2MM_0:S_AXIS_S2MM_CMD_0} \
+   CONFIG.ASSOCIATED_BUSIF {S_AXIS_S2MM_0:S_AXIS_S2MM_CMD_0:M_AXIS_S2MM_STS_0} \
  ] $pl_clk0
   set aresetn [ create_bd_port -dir O -from 0 -to 0 -type rst aresetn ]
   set bus_struct_reset_0 [ create_bd_port -dir O -from 0 -to 0 -type rst bus_struct_reset_0 ]
@@ -740,10 +742,11 @@ Port;FD4A0000;FD4AFFFF;0|FPD;DPDMA;FD4C0000;FD4CFFFF;0|FPD;DDR_XMPU5_CFG;FD05000
   set axi_datamover_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_datamover:5.1 axi_datamover_0 ]
   set_property -dict [list \
     CONFIG.c_addr_width {32} \
-    CONFIG.c_dummy {1} \
+    CONFIG.c_dummy {0} \
     CONFIG.c_enable_cache_user {true} \
     CONFIG.c_enable_mm2s {0} \
     CONFIG.c_enable_s2mm_adv_sig {0} \
+    CONFIG.c_s2mm_support_indet_btt {true} \
   ] $axi_datamover_0
 
 
@@ -769,6 +772,7 @@ Port;FD4A0000;FD4AFFFF;0|FPD;DPDMA;FD4C0000;FD4CFFFF;0|FPD;DDR_XMPU5_CFG;FD05000
   connect_bd_intf_net -intf_net S_AXIS_S2MM_CMD_0_1 [get_bd_intf_ports S_AXIS_S2MM_CMD_0] [get_bd_intf_pins axi_datamover_0/S_AXIS_S2MM_CMD]
   connect_bd_intf_net -intf_net axi_bram_ctrl_0_BRAM_PORTA [get_bd_intf_pins axi_bram_ctrl_0_bram/BRAM_PORTA] [get_bd_intf_pins axi_bram_ctrl_0/BRAM_PORTA]
   connect_bd_intf_net -intf_net axi_bram_ctrl_1_BRAM_PORTA [get_bd_intf_pins axi_bram_ctrl_1_bram/BRAM_PORTA] [get_bd_intf_pins axi_bram_ctrl_1/BRAM_PORTA]
+  connect_bd_intf_net -intf_net axi_datamover_0_M_AXIS_S2MM_STS [get_bd_intf_ports M_AXIS_S2MM_STS_0] [get_bd_intf_pins axi_datamover_0/M_AXIS_S2MM_STS]
   connect_bd_intf_net -intf_net axi_datamover_0_M_AXI_S2MM [get_bd_intf_pins axi_datamover_0/M_AXI_S2MM] [get_bd_intf_pins axi_smc_1/S00_AXI]
   connect_bd_intf_net -intf_net axi_iic_0_IIC [get_bd_intf_ports tempsensor_i2c_pl] [get_bd_intf_pins axi_iic_0/IIC]
   connect_bd_intf_net -intf_net axi_smc_1_M00_AXI [get_bd_intf_pins axi_smc_1/M00_AXI] [get_bd_intf_pins zynq_ultra_ps_e_0/S_AXI_HPC0_FPD]

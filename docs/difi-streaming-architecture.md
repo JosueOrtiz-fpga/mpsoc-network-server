@@ -14,6 +14,7 @@ Architecture of the VITA 49.2 / DIFI I/Q stream from the ZUBoard 1CG to GNU Radi
 - [Data path](#data-path)
 - [Packet format](#packet-format)
 - [Control plane](#control-plane)
+- [PL-driven DMA (v1.0.0)](#pl-driven-dma-v100)
 - [Register map](#register-map)
 - [Sequences](#sequences)
 - [Timebase and timestamps](#timebase-and-timestamps)
@@ -69,7 +70,7 @@ The **DDC** mixes the selected input to baseband with a tunable, phase-continuou
 
 The **DIFI packetizer** accumulates `SAMPLES_PER_PKT` samples, byte-swaps them to big-endian, and prepends the 28-byte DIFI prologue: header, stream ID, class ID, and integer and fractional timestamps. The timestamp is the time the packet's first sample left the signal source (see [Timebase and timestamps](#timebase-and-timestamps)). It also emits context packets according to the [context rules](#context-packet-rules). Both packet types leave through the same AXI4-Stream, so their ordering is preserved end to end.
 
-**AXI DMA** in S2MM scatter-gather mode writes packets through `S_AXI_HPC0` into a DDR ring of 1024 fixed 2 KB slots (2 MB; the largest packet is 1,472 B), one packet per slot, delimited by `TLAST`. The port is used with CCI coherency, so the A53 caches never hold stale ring data; this needs a cacheable `AWCACHE` value on the DMA's write channel and `dma-coherent` in the overlay (exact settings _(verify)_ against UG1085). Ownership of the slots is described under [Driver](#driver).
+**AXI DMA** in S2MM scatter-gather mode writes packets through `S_AXI_HPC0` into a DDR ring of 1024 fixed 2 KB slots (2 MB; the largest packet is 1,472 B), one packet per slot, delimited by `TLAST`. The port is used with CCI coherency, so the A53 caches never hold stale ring data; this needs a cacheable `AWCACHE` value on the DMA's write channel and `dma-coherent` in the overlay (exact settings _(verify)_ against UG1085). Ownership of the slots is described under [Driver](#driver). For v1.0.0, the PL commands an AXI DataMover instead; see [PL-driven DMA (v1.0.0)](#pl-driven-dma-v100).
 
 ### PS
 
@@ -203,6 +204,106 @@ Bring-up uses UIO for the register bank plus a `udmabuf` region with single-shot
 The PL is loaded at runtime by FPGA Manager and can be replaced at runtime. The driver must therefore stop the stream and release the DMA ring in its `remove` path, before the overlay is removed.
 
 The interrupt must be wired to `pl_ps_irq0` in `hw/bd/mpsoc_bd.tcl`, so that Lopper generates `interrupts`/`interrupt-parent` in the overlay. This is the same issue already open for `axi_iic_0`.
+
+---
+
+## PL-driven DMA (v1.0.0)
+
+> **Deviation:** v1.0.0 replaces the scatter-gather AXI DMA and its dmaengine driver with an AXI DataMover that the PL commands itself, as proposed in the [v1.0.0 MVP evaluation](v1-mvp-evaluation.md). The slot ring and its ownership rules from [Driver](#driver) stay. The PL now keeps the producer index, and each slot has one status word in a PL BRAM in place of a dmaengine descriptor. Descriptors report how a slot was filled, never where it is: slot addresses follow from the ring base. The evaluation's open decisions still apply.
+
+### Addressing
+
+All DMA addresses are 32-bit DDR byte addresses. Both block designs build the DataMover with a 32-bit address (`c_addr_width`). Through `S_AXI_HPC0` it reaches `HPC0_DDR_LOW`, `0x0000_0000`–`0x7FFF_FFFF`, so the ring must lie entirely inside that region. There is no upper address word.
+
+### Shared memories
+
+| Memory | A53 address | Size | Holds |
+|---|---|---|---|
+| CTL BRAM | `0xB001_0000` | 8 KB | Ring configuration and the load handshake |
+| DMA BRAM | `0xB001_2000` | 8 KB | One descriptor per slot |
+
+The A53 reaches each BRAM through an AXI BRAM controller. The PL uses the second port, on `pl_clk0`.
+
+### CTL BRAM
+
+| Offset | Name | Written by | Meaning |
+|---|---|---|---|
+| `0x0` | `CTL_STATUS` | Both | Bit 0 `PL_WRITTEN`, bit 1 `A53_WRITTEN`. Each side sets or clears only its own bit and preserves the other. |
+| `0x4` | `BUF_BASE` | A53 | Ring base, a 32-bit DDR byte address, 2 KB aligned |
+| `0x8` | `SLOT_COUNT` | A53 | Number of slots N, 1 to 1024 |
+| `0xC`–`0x1FFC` | | | Reserved, written as 0 |
+
+`BUF_BASE + 2048 × SLOT_COUNT` must not exceed `0x8000_0000`. The PL does not check these values; out-of-range values are a software error.
+
+**Load handshake.** The PL sets `PL_WRITTEN` once it can accept a configuration:
+
+1. The A53 writes `BUF_BASE` and `SLOT_COUNT`, then waits for `CTL_STATUS` = `0x1`.
+2. The A53 sets `A53_WRITTEN`: `0x3`.
+3. The PL clears `PL_WRITTEN`, then reads `0x4` and `0x8`: `0x2`.
+4. The A53 sees `0x2` and clears `A53_WRITTEN`: `0x0`.
+5. The PL sets `PL_WRITTEN` again (`0x1`), sets its producer index to slot 0, and starts streaming.
+
+Software loads the ring once per PL configuration, after zeroing every descriptor. A reload while packets are flowing is undefined in v1.0.0.
+
+### DDR ring
+
+Slot i occupies `BUF_BASE + 2048 × i` to `BUF_BASE + 2048 × i + 2047`. Each slot holds one packet, starting at its first byte. 2 KB holds the largest packet (1,472 B). Because slots are a power of two in size and aligned to it, a packet never crosses a 4 KB boundary, which an AXI burst may not.
+
+### Descriptors
+
+Word i of the DMA BRAM, at offset `4 × i`, describes slot i. A zero word means the PL owns the slot.
+
+| Bits | Field | Meaning |
+|---|---|---|
+| 31 | `VALID` | 1: the PL has finished the slot, and software owns it |
+| 30 | `ERR` | The DataMover's status for the slot was not OKAY; the slot's contents are undefined |
+| 29:16 | `SEQ` | Packet sequence number, modulo 2¹⁴ |
+| 15:0 | `LENGTH` | Bytes written to the slot |
+
+`SEQ` counts every packet the PL produced, including dropped ones, so a gap between consecutive descriptors is the number of packets dropped because the ring was full. `LENGTH` is in bytes, the same unit as the DataMover's BTT; the UDP sender uses it as the datagram length.
+
+### PL rules
+
+The PL keeps a producer index p, which a load sets to 0 and which advances modulo `SLOT_COUNT`.
+
+1. **Claim.** At the start of each packet, the PL reads descriptor p. If `VALID` is set, or slot p still has a command in flight, the ring is full: the PL drops the whole packet (see [Loss accounting](#loss-accounting-and-error-handling)), advances `SEQ`, and leaves p alone.
+2. **Command.** Otherwise it issues one DataMover command for slot p and advances p. TVALID is held until TREADY, and the DataMover must accept the command no later than the packet's first beat.
+3. **Stream.** The packet follows on the DataMover's stream input with `TLAST` on its last beat. Its byte count equals the command's BTT.
+4. **Complete.** Statuses return in command order. On each one, the PL writes the descriptor of the oldest slot in flight with `VALID` = 1, `ERR` = not OKAY, and that packet's `SEQ` and `LENGTH`. It then pulses `pl_ps_irq1` for one `pl_clk0` cycle.
+
+The DataMover returns a status only after the packet's write responses, so `VALID` = 1 means the packet is already in DDR. Software needs no delay between the interrupt and reading the slot.
+
+**Command**, 80 bits for this DataMover configuration (32-bit address, xCACHE and xUSER enabled; PG022):
+
+| Bits | Field | Value |
+|---|---|---|
+| 79:76 | xCACHE | See [Coherency](#coherency) |
+| 75:72 | xUSER | 0 |
+| 71:68 | RSVD | 0 |
+| 67:64 | TAG | p[3:0], to cross-check the status |
+| 63:32 | SADDR | `BUF_BASE + 2048 × p` |
+| 31 | DRR | 0 (no DRE) |
+| 30 | EOF | 1 |
+| 29:24 | DSA | 0 |
+| 23 | TYPE | 1 (INCR) |
+| 22:0 | BTT | Packet length in bytes; the DataMover uses bits 15:0 |
+
+**Status**, 8 bits: bit 7 OKAY, bit 6 SLVERR, bit 5 DECERR, bit 4 INTERR, bits 3:0 TAG.
+
+### Software rules
+
+1. Reserve the ring in low DDR (a `reserved-memory` node), and map it as [Coherency](#coherency) requires.
+2. Zero descriptors 0 to N − 1, then load the ring through the handshake.
+3. Keep a consumer index c, starting at 0. After loading and on every interrupt, while descriptor c has `VALID` set:
+   - if `ERR` is set, count the error;
+   - otherwise send `LENGTH` bytes from slot c as one datagram;
+   - then write 0 to descriptor c and advance c modulo N.
+4. Treat the interrupt only as a wake-up. One interrupt may cover several slots, so software never infers slots from a count of interrupts.
+5. Check `SEQ` continuity, and count gaps as dropped packets.
+
+### Coherency
+
+The xCACHE value, and with it the DataMover's `AWCACHE`, is open. One choice is `0011` (normal, non-cacheable, bufferable) with an uncached mapping, as the [evaluation](v1-mvp-evaluation.md#recommendations) recommends. The other is a cacheable value with CCI coherency through HPC0 and `dma-coherent` in the overlay, as under [Data path](#pl). The PL and the overlay must agree.
 
 ---
 
@@ -587,6 +688,8 @@ GPS time as the integer-seconds timestamp (TSI GPS). The PL's part is small: the
 - [x] DIFI 1.3.x: no action; the stream is already a valid v1.3.0 Basic Data Plane.
 - [x] UIO + `udmabuf` for register and packetizer bring-up; kernel driver before `test_difi_stream` (see [Driver](#driver)).
 - [ ] Wire the interrupt to `pl_ps_irq0` (same fix as `axi_iic_0`).
+- [ ] v1.0.0 DMA coherency: `AWCACHE` `0011` with an uncached mapping, or cacheable with CCI (see [Coherency](#coherency)).
+- [ ] v1.0.0 DMA interrupt: `pl_ps_irq1` is a one-cycle pulse, so the overlay must declare it rising-edge _(verify)_.
 
 ---
 
@@ -598,6 +701,7 @@ GPS time as the integer-seconds timestamp (TSI GPS). The PL's part is small: the
 - DIFI Consortium GitHub: `gr-difi` (based on DIFI 1.0); `DIFI-Certification` DIFI 101 tutorial and Wireshark dissector (targets 1.2)
 - `vita49` Rust crate (Voyager), Geon `vrtgen` and `wireshark-vrtgen`: open-source VITA 49.2 implementations useful as cross-checks
 - AMD PG021: AXI DMA LogiCORE IP product guide
+- AMD PG022: AXI DataMover LogiCORE IP product guide (command and status formats)
 - AMD UG1085: Zynq UltraScale+ Device Technical Reference Manual
 - ZUBoard 1CG Hardware User Guide v1.0 and schematic AES-ZUB-1CG-DK-G Rev 1 (Ethernet: sheet 7)
 - Project: `README.md`, `sw/meta-zub1cg/board-dts/zub1cg-board.dtsi`

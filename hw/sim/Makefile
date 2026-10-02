@@ -21,7 +21,7 @@ SIM_BD_NAME   ?= sim_mpsco_bd
 SIM_BUILD_DIR ?= $(REPO_ROOT)/build/sim
 XSIM_DIR      := $(SIM_BUILD_DIR)/export/$(SIM_BD_NAME)/xsim
 WAVES         ?= 0
-TESTS         ?= bringup ctl_init_handshake
+TESTS         ?= bringup ctl_init_handshake s2mm_dma
 PLUSARGS      ?=
 
 VIVADO       ?= vivado

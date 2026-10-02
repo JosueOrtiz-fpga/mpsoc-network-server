@@ -185,7 +185,7 @@ module sim_bd_harness (
   input  wire        S_AXIS_S2MM_0_tlast,
   input  wire        S_AXIS_S2MM_0_tvalid,
   input  wire        S_AXIS_S2MM_0_tready,
-  input  wire [111:0] S_AXIS_S2MM_CMD_0_tdata,
+  input  wire [79:0] S_AXIS_S2MM_CMD_0_tdata,
   input  wire        S_AXIS_S2MM_CMD_0_tvalid,
   input  wire        S_AXIS_S2MM_CMD_0_tready,
   input  wire        pl_ps_irq1_0
@@ -247,8 +247,8 @@ module sim_bd_harness (
   assign data_if.tvalid = S_AXIS_S2MM_0_tvalid;
   assign data_if.tready = S_AXIS_S2MM_0_tready;
 
-  // The DataMover's command port is 80 bits; top drives 112.
-  axis_if #(.DATA_W(112), .KEEP_W(1)) cmd_if (.aclk(pl_clk0), .aresetn(aresetn[0]));
+  // 80-bit DataMover command: 32-bit address, with xCACHE and xUSER.
+  axis_if #(.DATA_W(80), .KEEP_W(1)) cmd_if (.aclk(pl_clk0), .aresetn(aresetn[0]));
   assign cmd_if.tdata  = S_AXIS_S2MM_CMD_0_tdata;
   assign cmd_if.tkeep  = 1'b1;
   assign cmd_if.tlast  = 1'b1;

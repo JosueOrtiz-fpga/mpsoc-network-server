@@ -355,10 +355,11 @@ proc create_root_design { parentCell } {
   set axi_datamover_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_datamover:5.1 axi_datamover_0 ]
   set_property -dict [list \
     CONFIG.c_addr_width {32} \
-    CONFIG.c_dummy {1} \
+    CONFIG.c_dummy {0} \
     CONFIG.c_enable_cache_user {true} \
     CONFIG.c_enable_mm2s {0} \
     CONFIG.c_enable_s2mm_adv_sig {0} \
+    CONFIG.c_s2mm_support_indet_btt {true} \
   ] $axi_datamover_0
 
 

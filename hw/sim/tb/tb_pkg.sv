@@ -4,7 +4,8 @@
 //   a53_model     the PS as Linux sees it: 32-bit accesses at the real PL
 //                 addresses, decoded onto the sim BD's two BRAM ports
 //   ddr_model     AXI4 write slave behind the DataMover (HPC0 and DDR in
-//                 the real design), with a sparse byte memory
+//                 the real design), with a sparse byte memory and a log
+//                 of every beat and burst it accepted
 //   axis_sink     always-ready AXI4-Stream sink that keeps what it receives
 `timescale 1ns/1ps
 
@@ -13,6 +14,8 @@ package tb_pkg;
   typedef virtual axi4_if #(.ADDR_W(12), .DATA_W(32), .ID_W(1), .USER_W(1)) bram_vif_t;
   typedef virtual axi4_if #(.ADDR_W(32), .DATA_W(32), .ID_W(4), .USER_W(4)) ddr_vif_t;
   typedef virtual axis_if #(.DATA_W(8)) sts_vif_t;
+  typedef virtual axis_if #(.DATA_W(32)) data_vif_t;
+  typedef virtual axis_if #(.DATA_W(80), .KEEP_W(1)) cmd_vif_t;
   typedef virtual clk_rst_if crst_vif_t;
 
   localparam bit [1:0] RESP_OKAY = 2'b00;
@@ -215,13 +218,21 @@ package tb_pkg;
   // ---------------------------------------------------------------------
   // Accepts INCR write bursts from the DataMover into a sparse byte memory.
   // WREADY is held low until a burst's AW has been accepted, which AXI
-  // allows a slave to do, so every W beat has a known address.
+  // allows a slave to do, so every W beat has a known address. Every beat
+  // and burst is also logged, with the time it was accepted.
   class ddr_model;
     ddr_vif_t        vif;
     bit [7:0]        mem[bit [31:0]];
     int unsigned     bursts;
     int unsigned     beats;
-    typedef struct { bit [31:0] addr; int unsigned len; bit [3:0] id; } aw_t;
+    // Percentage (0-100) of cycles inside a burst on which WREADY is low,
+    // so the DataMover backpressures its stream input.
+    int unsigned     wready_throttle = 0;
+    typedef struct { bit [31:0] addr; int unsigned len; bit [3:0] id; bit [3:0] cache; } aw_t;
+    typedef struct { bit [31:0] addr; bit [31:0] data; bit [3:0] strb; realtime t; } w_beat_t;
+    typedef struct { bit [31:0] addr; int unsigned len; bit [3:0] cache; realtime t_last; } burst_t;
+    w_beat_t         w_log[$];
+    burst_t          burst_log[$];
     local mailbox #(aw_t) aw_q = new();
     local mailbox #(bit [3:0]) b_q = new();
 
@@ -258,6 +269,7 @@ package tb_pkg;
           aw.addr = vif.slv_cb.awaddr;
           aw.len  = vif.slv_cb.awlen + 1;
           aw.id   = vif.slv_cb.awid;
+          aw.cache = vif.slv_cb.awcache;
           if (vif.slv_cb.awburst !== 2'b01 || vif.slv_cb.awsize !== 3'd2)
             $error("ddr: unsupported burst type %b / size %0d at 0x%08h",
                    vif.slv_cb.awburst, vif.slv_cb.awsize, aw.addr);
@@ -271,12 +283,15 @@ package tb_pkg;
         aw_t aw;
         aw_q.get(aw);
         bursts++;
-        vif.slv_cb.wready <= 1'b1;
         for (int unsigned beat = 0; beat < aw.len; ) begin
+          vif.slv_cb.wready <= ($urandom_range(99) >= wready_throttle);
           @(vif.slv_cb);
-          if (vif.slv_cb.wvalid === 1'b1) begin
+          // vif.wready is what was driven for this edge; the drive above
+          // for the next edge lands after the output skew.
+          if (vif.slv_cb.wvalid === 1'b1 && vif.wready === 1'b1) begin
             for (int b = 0; b < 4; b++)
               if (vif.slv_cb.wstrb[b]) mem[aw.addr + 4 * beat + b] = vif.slv_cb.wdata[8*b +: 8];
+            w_log.push_back('{aw.addr + 4 * beat, vif.slv_cb.wdata, vif.slv_cb.wstrb, $realtime});
             if (vif.slv_cb.wlast !== (beat == aw.len - 1))
               $error("ddr: WLAST=%b on beat %0d of a %0d-beat burst at 0x%08h",
                      vif.slv_cb.wlast, beat, aw.len, aw.addr);
@@ -285,6 +300,7 @@ package tb_pkg;
           end
         end
         vif.slv_cb.wready <= 1'b0;
+        burst_log.push_back('{aw.addr, aw.len, aw.cache, $realtime});
         b_q.put(aw.id);
       end
     endtask

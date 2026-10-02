@@ -10,8 +10,13 @@
 //                       n pl_clk0 cycles after aresetn is released,
 //                       +A53_ZERO=0 skips its zeroing of the CTL BRAM, and
 //                       +HANDSHAKES=<n> runs n handshakes (default 2)
+//   s2mm_dma            after one handshake, top's packets reach DDR through
+//                       the DataMover: commands, stream, DDR contents, status,
+//                       DMA BRAM descriptor and interrupt; +PACKETS=<n>
+//                       (default 3), +DDR_THROTTLE=<p> drops the DDR model's
+//                       WREADY on p% of cycles, +IRQ_LATENCY=<n> (default 100)
 //
-// The DDR and status models only report what they saw.
+// Outside s2mm_dma the DDR and status models only report what they saw.
 `timescale 1ns/1ps
 
 module tb_top;
@@ -109,6 +114,53 @@ module tb_top;
     else      return $sformatf("+%0d  PL read  0x%01h", a.cycle - t0, a.addr);
   endfunction
 
+  // --- S2MM monitors ----------------------------------------------------------
+  // What top hands the DataMover and the PS, from reset on: commands and
+  // stream beats as accepted (TVALID and TREADY), interrupt rising edges, and
+  // port B writes to the DMA BRAM. The AXI4-Stream monitors sample through the
+  // interfaces' clocking blocks, since TREADY comes from the DataMover; irq and
+  // port B are top's own registers, sampled like the CTL monitor above.
+  typedef struct { realtime t; logic [79:0] cmd; } cmd_rec_t;
+  typedef struct { realtime t; logic [31:0] data; logic [3:0] keep; logic last; } beat_rec_t;
+  typedef struct { realtime t; logic [31:0] addr; logic [31:0] data; logic [3:0] we; } dma_wr_t;
+
+  cmd_rec_t  cmd_log[$];
+  beat_rec_t beat_log[$];
+  realtime   irq_log[$];
+  dma_wr_t   dma_wr_log[$];
+  logic      irq_q;
+
+  initial begin : s2mm_cmd_mon
+    cmd_vif_t vif;
+    vif = dut.u_sim_bd_harness.cmd_if;
+    forever begin
+      @(vif.mon_cb);
+      if (vif.mon_cb.tvalid === 1'b1 && vif.mon_cb.tready === 1'b1)
+        cmd_log.push_back('{$realtime, vif.mon_cb.tdata});
+    end
+  end
+
+  initial begin : s2mm_data_mon
+    data_vif_t vif;
+    vif = dut.u_sim_bd_harness.data_if;
+    forever begin
+      @(vif.mon_cb);
+      if (vif.mon_cb.tvalid === 1'b1 && vif.mon_cb.tready === 1'b1)
+        beat_log.push_back('{$realtime, vif.mon_cb.tdata, vif.mon_cb.tkeep, vif.mon_cb.tlast});
+    end
+  end
+
+  always @(posedge bd_pl_clk0) begin
+    if (dut.pl_ps_irq1_0 === 1'b1 && irq_q !== 1'b1) irq_log.push_back($realtime);
+    irq_q <= dut.pl_ps_irq1_0;
+    if (dut.BRAM_PORTB_1_en === 1'b1 && dut.BRAM_PORTB_1_we !== 4'b0)
+      dma_wr_log.push_back('{$realtime, dut.BRAM_PORTB_1_addr, dut.BRAM_PORTB_1_din, dut.BRAM_PORTB_1_we});
+  end
+
+  function automatic int cycles(realtime from, realtime to);
+    return int'((to - from) / PL_CLK0_NOM);
+  endfunction
+
   initial begin : clock_ref
     crst = dut.u_sim_bd_harness.crst_if;
     forever #(REF_PERIOD / 2) crst.clk_100MHz = ~crst.clk_100MHz;
@@ -139,7 +191,8 @@ module tb_top;
     case (test_name)
       "bringup":            test_bringup();
       "ctl_init_handshake": test_ctl_init_handshake();
-      default: $fatal(1, "unknown +TEST=%s (known: bringup, ctl_init_handshake)", test_name);
+      "s2mm_dma":           test_s2mm_dma();
+      default: $fatal(1, "unknown +TEST=%s (known: bringup, ctl_init_handshake, s2mm_dma)", test_name);
     endcase
 
     finish();
@@ -390,6 +443,241 @@ module tb_top;
                     SETTLE_WINDOW, writes, pl_loads));
     a53.read32(CTL_STATUS, word);
     check(word === PL_WRITTEN, $sformatf("A53 reads CTL_STATUS = 0x%08h at the end (expect 0x%08h)", word, PL_WRITTEN));
+  endtask
+
+  // --- s2mm_dma --------------------------------------------------------------
+  // top's S2MM path once one handshake has loaded a DMA address: the dummy
+  // stream, one DataMover command per packet, the packet in DDR, its status,
+  // the DMA BRAM descriptor and the interrupt. Expected values come from top's
+  // own constants (PKT_LENGTH, XCACHE_CACHEABLE, XUSER_DEFAULT, CMD_TAG) and
+  // from the DataMover as the BD configures it (PG022): 32-bit address with
+  // xCACHE and xUSER, so the 80-bit command s2mm_cmd_t and the 8-bit status
+  // s2mm_sts_t below.
+  //
+  // A packet is PKT_LENGTH 32-bit beats carrying 0, 1, ..., with TLAST on the
+  // last. Its command must cover exactly that packet (BTT = 4 * PKT_LENGTH
+  // bytes), so the DataMover writes it at SADDR and nowhere else. On each
+  // interrupt the A53 waits +IRQ_LATENCY cycles, reads the DMA BRAM slot,
+  // expects {PKT_LENGTH, valid}, and zeroes it again, as top assumes.
+  typedef struct packed {
+    bit [3:0]  xcache;
+    bit [3:0]  xuser;
+    bit [3:0]  rsvd;
+    bit [3:0]  tag;
+    bit [31:0] saddr;
+    bit        drr;
+    bit        eof;
+    bit [5:0]  dsa;
+    bit        incr;
+    bit [22:0] btt;
+  } s2mm_cmd_t;
+
+  typedef struct packed {
+    bit       okay;
+    bit       slverr;
+    bit       decerr;
+    bit       interr;
+    bit [3:0] tag;
+  } s2mm_sts_t;
+
+  localparam bit [31:0] DMA_SLOT = a53_model::DMA_BRAM_BASE;  // descriptor word
+
+  function automatic string cmd_str(s2mm_cmd_t c);
+    return $sformatf("BTT %0d, INCR %0d, DSA %0d, EOF %0d, DRR %0d, SADDR 0x%08h, TAG %0h, RSVD %0h, xUSER %0h, xCACHE %0h",
+                     c.btt, c.incr, c.dsa, c.eof, c.drr, c.saddr, c.tag, c.rsvd, c.xuser, c.xcache);
+  endfunction
+
+  task automatic test_s2mm_dma();
+    // A buffer in low DDR, which a 32-bit DataMover address can reach.
+    localparam bit [31:0] DMA_LO = 32'h1000_0000;
+    localparam bit [31:0] DMA_HI = 32'h0000_0000;
+
+    int unsigned packets = 3, throttle = 0, latency = 100;
+    int unsigned pkt_beats, pkt_bytes, timeout, waited, beat, k, n, bad;
+    string       first_bad;
+    s2mm_cmd_t   exp_cmd;
+    s2mm_sts_t   status;
+    bit [31:0]   exp_desc;
+    bit [31:0]   desc_log[$];   // the slot as the A53 read it, per interrupt
+    realtime     pkt_start[$], pkt_last[$];
+    realtime     t0, t_ddr, lag_max;
+    bit          ok, stop_a53;
+    ddr_model::w_beat_t w;
+
+    if (!$value$plusargs("PACKETS=%d", packets)) packets = 3;
+    if (!$value$plusargs("DDR_THROTTLE=%d", throttle)) throttle = 0;
+    if (!$value$plusargs("IRQ_LATENCY=%d", latency)) latency = 100;
+    if (throttle > 90) $fatal(1, "+DDR_THROTTLE=%0d: at most 90", throttle);
+    ddr.wready_throttle = throttle;
+
+    pkt_beats = dut.PKT_LENGTH;
+    pkt_bytes = 4 * pkt_beats;
+    exp_cmd        = '0;
+    exp_cmd.xcache = dut.XCACHE_CACHEABLE;
+    exp_cmd.xuser  = dut.XUSER_DEFAULT;
+    exp_cmd.tag    = 4'(dut.CMD_TAG);
+    exp_cmd.saddr  = DMA_LO;
+    exp_cmd.eof    = 1'b1;
+    exp_cmd.incr   = 1'b1;
+    exp_cmd.btt    = pkt_bytes;
+    exp_desc       = {31'(pkt_beats), 1'b1};
+    $display("[%0t] INFO  %0d packets of %0d beats, DDR WREADY low on %0d%% of cycles, A53 answers irq after %0d cycles",
+             $time, packets, pkt_beats, throttle, latency);
+
+    // 1. The A53 zeroes the descriptor slot and installs its interrupt
+    // handler, then loads the DMA address through the CTL handshake.
+    a53.write32(DMA_SLOT, 32'h0);
+    stop_a53 = 0;
+    fork
+      begin
+        int unsigned handled = 0;
+        bit [31:0]   word;
+        while (!stop_a53) begin
+          @(posedge bd_pl_clk0);
+          if (irq_log.size() > handled) begin
+            handled++;
+            repeat (latency) @(posedge bd_pl_clk0);
+            a53.read32(DMA_SLOT, word);
+            desc_log.push_back(word);
+            a53.write32(DMA_SLOT, 32'h0);
+          end
+        end
+      end
+    join_none
+
+    one_handshake(1, DMA_LO, DMA_HI, 1'b1, ok);
+    if (!ok) begin
+      stop_a53 = 1;
+      return;
+    end
+
+    // 2. Wait for PACKETS interrupts, allowing each packet four times its
+    // length at the throttled rate, then for the last one to drain.
+    timeout = 1000 + packets * pkt_beats * 4 * 100 / (100 - throttle);
+    for (waited = 0; irq_log.size() < packets && waited < timeout; waited++) @(posedge bd_pl_clk0);
+    repeat (latency + 500) @(posedge bd_pl_clk0);
+    stop_a53 = 1;
+
+    // 3. The stream: whole packets of PKT_LENGTH beats counting from 0.
+    bad = 0;
+    beat = 0;
+    foreach (beat_log[i]) begin
+      if (pkt_last.size() >= packets) break;
+      if (beat == 0) pkt_start.push_back(beat_log[i].t);
+      if (beat_log[i].data !== beat || beat_log[i].keep !== 4'hF || beat_log[i].last !== (beat == pkt_beats - 1))
+        if (bad++ == 0)
+          first_bad = $sformatf("packet %0d beat %0d: TDATA 0x%08h TKEEP %b TLAST %b", pkt_last.size(), beat,
+                                beat_log[i].data, beat_log[i].keep, beat_log[i].last);
+      if (beat_log[i].last === 1'b1) begin
+        pkt_last.push_back(beat_log[i].t);
+        beat = 0;
+      end else beat++;
+    end
+    check(pkt_last.size() >= packets,
+          $sformatf("stream: DataMover accepted %0d whole packets (expect %0d); %0d beats in all, TVALID %b TREADY %b now",
+                    pkt_last.size(), packets, beat_log.size(), dut.S_AXIS_S2MM_0_tvalid, dut.S_AXIS_S2MM_0_tready));
+    check(bad == 0, bad == 0 ? $sformatf("stream: the %0d beats checked are in sequence (packets of %0d beats 0..%0d, TKEEP 1111, TLAST on the last)",
+                                         beat_log.size() < packets * pkt_beats ? beat_log.size() : packets * pkt_beats,
+                                         pkt_beats, pkt_beats - 1)
+                             : $sformatf("stream: %0d beats wrong, first %s", bad, first_bad));
+
+    // 4. One command per packet, covering that packet.
+    check(cmd_log.size() >= packets,
+          $sformatf("DataMover accepted %0d commands (expect at least %0d, one per packet)", cmd_log.size(), packets));
+    foreach (cmd_log[i]) if (i < packets)
+      check(!$isunknown(cmd_log[i].cmd) && s2mm_cmd_t'(cmd_log[i].cmd) == exp_cmd,
+            $sformatf("command %0d: %s (expect %s)", i, cmd_str(cmd_log[i].cmd), cmd_str(exp_cmd)));
+
+    // 5. One OKAY status per command, carrying its tag.
+    check(sts.received.size() >= packets,
+          $sformatf("DataMover returned %0d status words (expect at least %0d)", sts.received.size(), packets));
+    foreach (sts.received[i]) if (i < packets) begin
+      status = sts.received[i];
+      check(status.okay && !status.slverr && !status.decerr && !status.interr && status.tag == exp_cmd.tag,
+            $sformatf("status %0d: 0x%02h, OKAY %0d SLVERR %0d DECERR %0d INTERR %0d TAG %0h (expect OKAY only, TAG %0h)",
+                      i, status, status.okay, status.slverr, status.decerr, status.interr, status.tag, exp_cmd.tag));
+    end
+
+    // 6. DDR: each packet lands at SADDR, beat n at SADDR + 4n holding n.
+    check(ddr.w_log.size() >= packets * pkt_beats,
+          $sformatf("DDR received %0d beats in %0d bursts (expect at least %0d for %0d packets)",
+                    ddr.w_log.size(), ddr.burst_log.size(), packets * pkt_beats, packets));
+    bad = 0;
+    foreach (ddr.w_log[i]) if (i < packets * pkt_beats) begin
+      w = ddr.w_log[i];
+      n = i % pkt_beats;
+      if (w.addr != DMA_LO + 4 * n || w.data != n || w.strb != 4'hF)
+        if (bad++ == 0)
+          first_bad = $sformatf("DDR beat %0d (packet %0d beat %0d): 0x%08h = 0x%08h, WSTRB %b (expect 0x%08h = 0x%08h)",
+                                i, i / pkt_beats, n, w.addr, w.data, w.strb, DMA_LO + 4 * n, n);
+    end
+    if (ddr.w_log.size() > 0)
+      check(bad == 0, bad == 0 ? $sformatf("DDR: every packet written to 0x%08h-0x%08h, in order, all bytes",
+                                           DMA_LO, DMA_LO + pkt_bytes - 1)
+                               : $sformatf("DDR: %0d beats wrong, first %s", bad, first_bad));
+    bad = 0;
+    n = 0;
+    foreach (ddr.burst_log[i]) begin
+      if (n >= packets * pkt_beats) break;
+      n += ddr.burst_log[i].len;
+      if (ddr.burst_log[i].cache != dut.XCACHE_CACHEABLE && bad++ == 0)
+        first_bad = $sformatf("burst %0d at 0x%08h has 0x%h", i, ddr.burst_log[i].addr, ddr.burst_log[i].cache);
+    end
+    if (ddr.burst_log.size() > 0)
+      check(bad == 0, bad == 0 ? $sformatf("DDR: every burst has AWCACHE 0x%h", dut.XCACHE_CACHEABLE)
+                               : $sformatf("DDR: %0d bursts without AWCACHE 0x%h, first %s", bad, dut.XCACHE_CACHEABLE, first_bad));
+
+    // 7. One interrupt per packet, after its TLAST and before the next one's.
+    for (k = 0; k < packets; k++) begin
+      if (k >= pkt_last.size() || k >= irq_log.size()) begin
+        check(0, $sformatf("packet %0d: interrupt (%0d packets, %0d interrupts)", k, pkt_last.size(), irq_log.size()));
+        break;
+      end
+      check(irq_log[k] > pkt_last[k] && (k + 1 >= pkt_last.size() || irq_log[k] < pkt_last[k + 1]),
+            $sformatf("packet %0d: interrupt %0d cycles after its TLAST, before the next packet's", k,
+                      cycles(pkt_last[k], irq_log[k])));
+    end
+
+    // 8. The descriptor: top writes {PKT_LENGTH, 1} to DMA BRAM word 0 per
+    // packet, and the A53 reads it there.
+    check(dma_wr_log.size() >= packets,
+          $sformatf("PL wrote the DMA BRAM %0d times (expect at least %0d, one per packet)", dma_wr_log.size(), packets));
+    foreach (dma_wr_log[i]) if (i < packets)
+      check(dma_wr_log[i].addr === 32'h0 && dma_wr_log[i].we === 4'hF && dma_wr_log[i].data === exp_desc,
+            $sformatf("PL descriptor write %0d: 0x%08h = 0x%08h, WE %b, %0d cycles after its interrupt (expect 0x0 = 0x%08h, WE 1111)",
+                      i, dma_wr_log[i].addr, dma_wr_log[i].data, dma_wr_log[i].we,
+                      i < irq_log.size() ? cycles(irq_log[i], dma_wr_log[i].t) : -1, exp_desc));
+    check(desc_log.size() >= packets,
+          $sformatf("A53 handled %0d interrupts (expect at least %0d)", desc_log.size(), packets));
+    foreach (desc_log[i]) if (i < packets)
+      check(desc_log[i] === exp_desc,
+            $sformatf("A53 reads descriptor %0d = 0x%08h, %0d cycles after the interrupt (expect 0x%08h: length %0d, valid)",
+                      i, desc_log[i], latency, exp_desc, pkt_beats));
+
+    // 9. Timeline, cycles from the first stream beat. The last column is
+    // what software must allow between the interrupt and reading DDR.
+    t0 = beat_log.size() > 0 ? beat_log[0].t : $realtime;
+    lag_max = 0;
+    $display("[%0t] INFO  per packet, pl_clk0 cycles from the first beat:", $time);
+    for (k = 0; k < packets && k < pkt_last.size(); k++) begin
+      string cmd_at = k < cmd_log.size() ? $sformatf("%0d", cycles(t0, cmd_log[k].t)) : "-";
+      string irq_at = k < irq_log.size() ? $sformatf("%0d", cycles(t0, irq_log[k])) : "-";
+      string ddr_at = "-", lag = "-";
+      if ((k + 1) * pkt_beats <= ddr.w_log.size()) begin
+        t_ddr  = ddr.w_log[(k + 1) * pkt_beats - 1].t;
+        ddr_at = $sformatf("%0d", cycles(t0, t_ddr));
+        if (k < irq_log.size()) begin
+          lag = $sformatf("%0d", cycles(irq_log[k], t_ddr));
+          if (t_ddr - irq_log[k] > lag_max) lag_max = t_ddr - irq_log[k];
+        end
+      end
+      $display("          packet %0d: beats %0d-%0d, command %s, irq %s, last DDR beat %s, irq to DDR %s",
+               k, cycles(t0, pkt_start[k]), cycles(t0, pkt_last[k]), cmd_at, irq_at, ddr_at, lag);
+    end
+    if (lag_max > 0)
+      $display("[%0t] INFO  last DDR beat lands up to %0d cycles after the interrupt", $time, cycles(0, lag_max));
+
+    check(a53.errors == 0, $sformatf("A53 accesses all completed with OKAY (%0d errors)", a53.errors));
   endtask
 
   // --- summary ---------------------------------------------------------------
