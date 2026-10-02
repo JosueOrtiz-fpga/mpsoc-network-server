@@ -1,0 +1,10 @@
+{
+    "name": "mpsoc-network-server",
+    "targets": {
+        "rtl": {
+            "libraryMapping": {
+                "": []
+            }
+        }
+    }
+}

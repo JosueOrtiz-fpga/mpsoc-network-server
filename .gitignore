@@ -6,3 +6,6 @@ layers/
 
 # Python bytecode (tests/hil)
 __pycache__/
+
+# Sigasi
+.sigasi/
