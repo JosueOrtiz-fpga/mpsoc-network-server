@@ -1,0 +1,164 @@
+HERE  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+
+SHELL       := bash
+.SHELLFLAGS := -eu -o pipefail -c
+MAKEFLAGS   += --warn-undefined-variables
+
+export GIT_TERMINAL_PROMPT := 0
+
+
+include $(HERE)/versions.env
+
+#---------------------
+# Output directories
+#---------------------
+BUILD := $(HERE)/build
+DL:=$(BUILD)/dl
+TC:=$(BUILD)/toolchain
+SRC:=$(BUILD)/src
+
+#---------------------------
+# Xilinx install repository
+#---------------------------
+XILINX_ROOT ?=/tools/Xilinx
+
+#---------------------------
+# GNU Tool Chain variables
+#---------------------------
+#  - names
+#  - tarball download locations
+#  - (target) timestamp locations
+#  - path to binaries
+#---------------------------
+TOOLCHAINS :=GNU_LINUX GNU_ELF
+
+TC_TARBALLS    := $(TOOLCHAINS:%=$(DL)/%-$(GNU_TOOLCHAIN_TAG).tar.xz)
+TC_LINUX_STAMP := $(TC)/GNU_LINUX-$(GNU_TOOLCHAIN_TAG)/.extracted
+TC_ELF_STAMP   := $(TC)/GNU_ELF-$(GNU_TOOLCHAIN_TAG)/.extracted
+TC_STAMPS      := $(TC_LINUX_STAMP) $(TC_ELF_STAMP)
+
+CROSS_LINUX := $(TC)/GNU_LINUX-$(GNU_TOOLCHAIN_TAG)/bin/aarch64-none-linux-gnu-
+CROSS_ELF   := $(TC)/GNU_ELF-$(GNU_TOOLCHAIN_TAG)/bin/aarch64-none-elf-
+CROSS_MB    := $(XILINX_ROOT)/$(VITIS_VER)/Vitis/gnu/microblaze/lin/bin/mb-
+CROSS_BINS  := $(CROSS_LINUX) $(CROSS_ELF) $(CROSS_MB)
+
+#---------------------------
+# Xilinx Source Repos variables
+#---------------------------
+#  - names
+#  - (target) timestamp locations
+#---------------------------
+REPOS                := XLNX_UBOOT XLNX_LINUX XLNX_EMBD_SW XLNX_TFA
+
+XLNX_UBOOT_STAMP     := $(SRC)/XLNX_UBOOT.cloned
+XLNX_LINUX_STAMP     := $(SRC)/XLNX_LINUX.cloned
+XLNX_EMBD_SW_STAMP   := $(SRC)/XLNX_EMBD_SW.cloned
+XLNX_TFA_STAMP       := $(SRC)/XLNX_TFA.cloned
+SRC_STAMPS           := $(XLNX_UBOOT_STAMP) $(XLNX_LINUX_STAMP) \
+                        $(XLNX_EMBD_SW_STAMP) $(XLNX_TFA_STAMP)
+
+# pattern rules
+check-url-%:
+	@curl -fsSIL -o /dev/null '$($*_URL)' \
+	&& echo "OK    $*" \
+	|| { echo "FAIL $*  $($*_URL)"; exit 1; }
+
+check-pin-%:
+	@want='$($*_HASH)'; \
+	if ! got=$$(git ls-remote '$($*_URL)' 'refs/tags/$($*_TAG)' 'refs/tags/$($*_TAG)^{}' | tail -n1 | cut -f1); then \
+	  echo "FAIL  $*  cannot query $($*_URL)"; exit 1; \
+	fi; \
+	if [ "$$got" = "$$want" ]; then \
+	  echo "OK    $*  $($*_TAG) -> $$got"; \
+	else \
+	  echo "FAIL  $*  $($*_TAG): pinned $$want, upstream $${got:-<tag not found>}"; exit 1; \
+	fi
+
+check-head-%:
+	@want='$($*_HASH)'; \
+	got=$$(git -C $(SRC)/$* rev-parse HEAD); \
+	if [ "$$got" = "$$want" ]; then \
+		echo "OK  $*  $($*_TAG) -> $$got"; \
+	else \
+		echo "FAIL  $*  $($*_TAG): pinned $$want, HEAD $${got}"; exit 1; \
+	fi
+
+check-cc-%:
+	@cc='$(CROSS_$*)gcc'; \
+	m=$$($$cc -dumpmachine); \
+	v=$$($$cc -dumpversion); \
+	echo "OK    $*  $$m  gcc $$v"
+
+
+print-%: ; @echo '$*=$($*)'
+
+
+# targets
+.PHONY: help clean distclean clean-src clean-tc check check-urls download toolchain sources
+.DELETE_ON_ERROR:
+
+.DEFAULT_GOAL := help
+
+help:
+	@echo "Test"
+
+check: $(REPOS:%=check-head-%) check-cc-MB check-cc-LINUX check-cc-ELF
+
+check-urls: $(TOOLCHAINS:%=check-url-%) $(REPOS:%=check-pin-%)
+
+download: $(TC_TARBALLS)
+
+toolchain: $(TC_STAMPS)
+
+sources: $(SRC_STAMPS)
+
+clean-src:
+	rm -rf $(SRC)
+
+clean-tc:
+	rm -rf $(TC)
+
+clean: clean-src clean-tc
+
+distclean: clean
+	rm -rf $(BUILD)
+
+#-----------------------------------
+# GNU tool chain download and extraction
+#-----------------------------------
+
+$(DL):
+	mkdir -p $@
+
+$(DL)/%-$(GNU_TOOLCHAIN_TAG).tar.xz: | $(DL)
+	curl -fL --retry 3 -o '$@.part' '$($*_URL)'
+	echo '$($*_SHA256)  $@.part' | sha256sum -c -
+	mv '$@.part' '$@'
+
+$(TC)/%-$(GNU_TOOLCHAIN_TAG)/.extracted: $(DL)/%-$(GNU_TOOLCHAIN_TAG).tar.xz
+	rm -rf $(@D)
+	mkdir -p $(@D)
+	tar -xf $< --strip-components=1 -C $(@D)
+	touch $@
+
+#-----------------------------------
+# Microblaze toolchain check
+#-----------------------------------
+check-cc-MB: $(CROSS_MB)gcc
+
+$(CROSS_MB)gcc:
+	@echo "ERROR: MicroBlaze toolchain not found: $@" >&2
+	@echo "       Install Vitis $(VITIS_VER), or point to it: make XILINX_ROOT=/path/to/Xilinx <target>" >&2
+	@exit 1
+
+#-----------------------------------
+# Xilinx Source Repos cloning
+#-----------------------------------
+$(SRC):
+	mkdir -p $@
+
+$(SRC)/%.cloned: | $(SRC)
+	rm -rf $(SRC)/$*
+	git clone --depth 1 --branch $($*_TAG) $($*_URL) $(SRC)/$*
+	@$(MAKE) --no-print-directory check-head-$*
+	touch $@
