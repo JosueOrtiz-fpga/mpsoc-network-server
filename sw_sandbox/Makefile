@@ -71,10 +71,19 @@ SDT_DIR := $(BUILD)/sdt
 #---------------------------
 # kas and Yoctco
 #---------------------------
-KAS_WORK_DIR  =? $(PWD)/sw_sandbox/build/kas
-KAS_BUILD_DIR =? $(PWD)/sw_sandbox/build/yocto
-DL_DIR        =? $(HOME)/.cache/zub1cg-yocto/downloads
-SSTATE_DIR    =? $(HOME)/.cache/zub1cg-yocto/sstate-cache
+KAS_WORK_DIR  ?= $(BUILD)/kas
+KAS_BUILD_DIR ?= $(BUILD)/yocto
+DL_DIR        ?= $(HOME)/.cache/zub1cg-yocto/downloads
+SSTATE_DIR    ?= $(HOME)/.cache/zub1cg-yocto/sstate-cache
+
+# from versions.env
+export KAS_IMAGE_VERSION
+export KAS_CONTAINER_IMAGE_DISTRO
+#
+export KAS_WORK_DIR
+export KAS_BUILD_DIR
+export DL_DIR
+export SSTATE_DIR
 
 # pattern rules
 check-url-%:
@@ -113,7 +122,7 @@ print-%: ; @echo '$*=$($*)'
 
 
 # targets
-.PHONY: help clean distclean sdt kas-dirs kas-shell kas-lock clean-src clean-tc check check-urls download toolchain sources
+.PHONY: help clean distclean sdt kas-dirs kas-shell kas-lock check-edf-version clean-src clean-tc check check-urls download toolchain sources
 .DELETE_ON_ERROR:
 
 .DEFAULT_GOAL := help
@@ -205,9 +214,19 @@ kas-dirs:
 	@mkdir -p $(DL_DIR)
 	@mkdir -p $(SSTATE_DIR)
 
-kas-shell: kas-dirs
-	@kas-container shell $(HERE)/kas/base.yml
+kas-shell: check-edf-version kas-dirs
+	kas-container shell $(HERE)/kas/base.yml
 
-kas-lock:
-	@kas-container lock --update $(HERE)/kas/base.yml
+kas-lock: check-edf-version kas-dirs
+	kas-container lock --update $(HERE)/kas/base.yml
+
+check-edf-version:
+	@want='rel-v$(EDF_RELEASE)'; \
+	got=$$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["defaults"]["repos"]["branch"])' \
+	       $(HERE)/kas/base.yml); \
+	if [ "$$got" = "$$want" ]; then \
+	  echo "OK    EDF  kas/base.yml -> $$got"; \
+	else \
+	  echo "FAIL  EDF  kas/base.yml tracks $$got, versions.env wants $$want (EDF_RELEASE)"; exit 1; \
+	fi
 
