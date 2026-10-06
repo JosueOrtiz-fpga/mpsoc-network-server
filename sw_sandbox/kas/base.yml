@@ -1,0 +1,129 @@
+header:
+  version: 14
+
+distro: amd-edf
+machine: amd-cortexa53-common
+
+local_conf_header:
+  10-edf_template_flags: |
+    # Comment from EDF local.conf.sample template
+    # """ Disable Fortran support - no ROS packages in our configuration
+    #   require it and gfortran is not available on all build hosts.
+    #   This must be in local.conf (not distro conf) because HOSTTOOLS
+    #   is global across all multiconfigs."""
+    ROS_WORLD_SKIP_GROUPS:append = " fortran"
+    #
+    LICENSE_FLAGS_ACCEPTED += "xilinx"
+    # Comment from EDF local.conf.sample template
+    #
+    # " Disk Space Monitoring during the build
+    #
+    # """ Monitor the disk space during the build. If there is less that 1GB of space or less
+    # than 100K inodes in any key build location (TMPDIR, DL_DIR, SSTATE_DIR), gracefully
+    # shutdown the build. If there is less than 100MB or 1K inodes, perform a hard halt
+    # of the build. The reason for this is that running completely out of space can corrupt
+    # files and damages the build in ways which may not be easily recoverable.
+    # It's necessary to monitor /tmp, if there is no space left the build will fail
+    # with very exotic errors."""
+    BB_DISKMON_DIRS ??= "\
+    STOPTASKS,${TMPDIR},1G,100K \
+    STOPTASKS,${DL_DIR},1G,100K \
+    STOPTASKS,${SSTATE_DIR},1G,100K \
+    STOPTASKS,/tmp,100M,100K \
+    HALT,${TMPDIR},100M,1K \
+    HALT,${DL_DIR},100M,1K \
+    HALT,${SSTATE_DIR},100M,1K \
+    HALT,/tmp,10M,1K"
+
+defaults:
+  repos:
+    branch: rel-v2026.1
+
+repos:
+
+
+  poky:
+    url: https://github.com/Xilinx/poky.git
+    path: layers/poky
+    layers:
+      meta:
+      meta-poky:
+
+  # amd-edf and its dependencies
+  meta-amd-edf:
+    url: https://github.com/Xilinx/meta-amd-edf.git
+    path: layers/meta-amd-edf
+    layers:
+      .:
+  amd-adaptive-socs-bsp:
+    url: https://github.com/Xilinx/meta-amd-adaptive-socs.git
+    path: layers/amd-adaptive-socs-bsp
+    layers:
+      meta-amd-adaptive-socs-bsp:
+      meta-amd-adaptive-socs-core:
+
+  meta-xilinx:
+    url: https://github.com/Xilinx/meta-xilinx.git
+    path: layers/meta-xilinx
+    layers:
+      meta-xilinx-core:
+      meta-xilinx-multimedia:
+      meta-xilinx-standalone:
+      meta-xilinx-standalone-sdt:
+      meta-microblaze:
+      meta-xilinx-imgrcvry:
+      meta-xilinx-virtualization:
+      meta-xilinx-demos:
+
+  meta-virtualization:
+    url: https://github.com/Xilinx/meta-virtualization.git
+    path: layers/meta-virtualization
+    layers:
+      .:
+
+  meta-openamp:
+    url: https://github.com/Xilinx/meta-openamp.git
+    path: layers/meta-openamp
+    layers:
+      .:
+
+  meta-qt5:
+    url: https://github.com/Xilinx/meta-qt5.git
+    path: layers/meta-qt5
+    layers:
+      .:
+
+  meta-ros:
+    url: https://github.com/Xilinx/meta-ros.git
+    path: layers/meta-ros
+    layers:
+      meta-ros2-jazzy:
+      meta-ros2:
+      meta-ros-common:
+
+  meta-security:
+    url: https://github.com/Xilinx/meta-security.git
+    path: layers/security
+    layers:
+      .:
+      meta-tpm:
+
+  meta-openembedded:
+    url: https://github.com/Xilinx/meta-openembedded.git
+    path: layers/meta-openembedded
+    layers:
+      meta-oe:
+      meta-python:
+      meta-filesystems:
+      meta-networking:
+
+  meta-arm:
+    url: https://github.com/Xilinx/meta-arm.git
+    path: layers/meta-arm
+    layers:
+      meta-arm:
+      meta-arm-toolchain:
+
+header:
+  version: 14
+

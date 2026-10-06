@@ -17,6 +17,10 @@ DL:=$(BUILD)/dl
 TC:=$(BUILD)/toolchain
 SRC:=$(BUILD)/src
 
+REPO := $(abspath $(HERE)/..)
+OUT   := $(REPO)/out
+HW    := $(OUT)/hw
+
 #---------------------------
 # Xilinx install repository
 #---------------------------
@@ -57,6 +61,21 @@ XLNX_TFA_STAMP       := $(SRC)/XLNX_TFA.cloned
 SRC_STAMPS           := $(XLNX_UBOOT_STAMP) $(XLNX_LINUX_STAMP) \
                         $(XLNX_EMBD_SW_STAMP) $(XLNX_TFA_STAMP)
 
+#---------------------------
+# SDT FLow Variables
+#---------------------------
+XSA  ?= $(REPO)/out/hw/system.xsa
+
+SDT_DIR := $(BUILD)/sdt
+
+#---------------------------
+# kas and Yoctco
+#---------------------------
+export KAS_WORK_DIR=$PWD/sw_sandbox/build/kas
+export KAS_BUILD_DIR=$PWD/sw_sandbox/build/yocto
+export DL_DIR=$HOME/.cache/zub1cg-yocto/downloads
+export SSTATE_DIR=$HOME/.cache/zub1cg-yocto/sstate-cache
+
 # pattern rules
 check-url-%:
 	@curl -fsSIL -o /dev/null '$($*_URL)' \
@@ -94,7 +113,7 @@ print-%: ; @echo '$*=$($*)'
 
 
 # targets
-.PHONY: help clean distclean clean-src clean-tc check check-urls download toolchain sources
+.PHONY: help clean distclean sdt clean-src clean-tc check check-urls download toolchain sources
 .DELETE_ON_ERROR:
 
 .DEFAULT_GOAL := help
@@ -122,6 +141,12 @@ clean: clean-src clean-tc
 
 distclean: clean
 	rm -rf $(BUILD)
+
+sdt: $(XSA)
+	$(if $(XSA),,$(error XSA is empty: pass XSA=/path/to/design.xsa))
+	rm -rf $(SDT_DIR)
+	cd $(BUILD) && sdtgen -xsa $(XSA) -dir $(SDT_DIR)
+
 
 #-----------------------------------
 # GNU tool chain download and extraction
@@ -162,3 +187,11 @@ $(SRC)/%.cloned: | $(SRC)
 	git clone --depth 1 --branch $($*_TAG) $($*_URL) $(SRC)/$*
 	@$(MAKE) --no-print-directory check-head-$*
 	touch $@
+
+#-----------------------------------
+# XSA check
+#-----------------------------------
+$(XSA):
+	@echo "ERROR: no XSA at $@" >&2
+	@echo "       Run 'make hw-xsa' in the repo root, or pass one: make sdt XSA=/path/to/design.xsa" >&2
+	@exit 1

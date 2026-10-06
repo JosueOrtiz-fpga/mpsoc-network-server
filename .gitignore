@@ -7,5 +7,9 @@ layers/
 # Python bytecode (tests/hil)
 __pycache__/
 
+# Sigasi
+.sigasi/
+
 # sw sandbox
 build/
+.kas_shell_history
