@@ -39,7 +39,7 @@ on hold. The plan now treats EDF/Yocto as the baseline. The by-hand work may com
 
 ---
 
-## Stage 1: Hardware description, XSA to SDT `[~]`
+## Stage 1: Hardware description, XSA to SDT `[x]`
 
 Reproduces: `make platform-sdt` (`sw/scripts/gen-sdt.sh`).
 
@@ -50,9 +50,9 @@ Reproduces: `make platform-sdt` (`sw/scripts/gen-sdt.sh`).
 - Flatten a tree with `cpp | dtc` to see what the include chain finally produces.
 
 Done when: `make sdt` produces `build/sdt/` from the XSA, and the Makefile changes are
-committed.
+committed. Done in commit `17b9201`.
 
-## Stage 2: kas skeleton, layers and local.conf `[~]`
+## Stage 2: kas skeleton, layers and local.conf `[x]`
 
 Reproduces: the `repos:` part of `sw/kas/base.yml`.
 
@@ -65,10 +65,11 @@ Reproduces: the `repos:` part of `sw/kas/base.yml`.
   need with `local_conf_header`.
 
 Done when:
-- [ ] `bitbake-layers show-layers` lists every layer inside `kas-container shell`.
-- [ ] The fortran skip is in the generated `local.conf`, and `gfortran` is not in `HOSTTOOLS`.
-- [ ] You have reviewed EDF's `local.conf.sample` and listed the settings you kept, with a
-      reason for each.
+- [x] `bitbake-layers show-layers` lists every layer inside `kas-container shell`.
+- [x] The fortran skip is in the generated `local.conf`, and `gfortran` is not in `HOSTTOOLS`.
+- [x] You have reviewed EDF's `local.conf.sample` and listed the settings you kept, with a
+      reason for each. Kept: fortran skip, `xilinx` license flag, `BB_DISKMON_DIRS`
+      (commit `17b9201`).
 
 ## Stage 3: Reproducible, scripted builds `[ ]`
 
@@ -81,7 +82,9 @@ Reproduces: `sw/Makefile` (`kas-dirs`, `sw-shell`, `sw-lock`, `check-versions`) 
   still be incremental.
 - Pinning: `kas lock` writes a lock file, and kas applies it automatically. This clears the
   "branch without commit" warnings.
-- Pinning `kas-container` itself (`KAS_IMAGE_VERSION`).
+- Pinning `kas-container` itself (`KAS_IMAGE_VERSION`) and its distro
+  (`KAS_CONTAINER_IMAGE_DISTRO=debian-bookworm`: the default Debian 13 image's GCC 14 fails
+  to build `bootgen-native`).
 
 Done when: `make` targets open a shell and write a lock file, a second checkout resolves the
 same commits, and kas prints no "unsafe" warnings.

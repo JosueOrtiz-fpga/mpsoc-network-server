@@ -71,10 +71,10 @@ SDT_DIR := $(BUILD)/sdt
 #---------------------------
 # kas and Yoctco
 #---------------------------
-export KAS_WORK_DIR=$PWD/sw_sandbox/build/kas
-export KAS_BUILD_DIR=$PWD/sw_sandbox/build/yocto
-export DL_DIR=$HOME/.cache/zub1cg-yocto/downloads
-export SSTATE_DIR=$HOME/.cache/zub1cg-yocto/sstate-cache
+KAS_WORK_DIR  =? $(PWD)/sw_sandbox/build/kas
+KAS_BUILD_DIR =? $(PWD)/sw_sandbox/build/yocto
+DL_DIR        =? $(HOME)/.cache/zub1cg-yocto/downloads
+SSTATE_DIR    =? $(HOME)/.cache/zub1cg-yocto/sstate-cache
 
 # pattern rules
 check-url-%:
@@ -113,7 +113,7 @@ print-%: ; @echo '$*=$($*)'
 
 
 # targets
-.PHONY: help clean distclean sdt clean-src clean-tc check check-urls download toolchain sources
+.PHONY: help clean distclean sdt kas-dirs kas-shell kas-lock clean-src clean-tc check check-urls download toolchain sources
 .DELETE_ON_ERROR:
 
 .DEFAULT_GOAL := help
@@ -195,3 +195,19 @@ $(XSA):
 	@echo "ERROR: no XSA at $@" >&2
 	@echo "       Run 'make hw-xsa' in the repo root, or pass one: make sdt XSA=/path/to/design.xsa" >&2
 	@exit 1
+
+#-----------------------------------
+# kas
+#-----------------------------------
+kas-dirs:
+	@mkdir -p $(KAS_WORK_DIR)
+	@mkdir -p $(KAS_BUILD_DIR)
+	@mkdir -p $(DL_DIR)
+	@mkdir -p $(SSTATE_DIR)
+
+kas-shell: kas-dirs
+	@kas-container shell $(HERE)/kas/base.yml
+
+kas-lock:
+	@kas-container lock --update $(HERE)/kas/base.yml
+
