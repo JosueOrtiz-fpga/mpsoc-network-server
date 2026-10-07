@@ -89,7 +89,7 @@ Reproduces: `sw/Makefile` (`kas-dirs`, `sw-shell`, `sw-lock`, `check-versions`) 
 Done when: `make` targets open a shell and write a lock file, a second checkout resolves the
 same commits, and kas prints no "unsafe" warnings. Done in commits `6b9bf70` and `565c408`.
 
-## Stage 4: First generic image `[~]`
+## Stage 4: First generic image `[x]`
 
 Reproduces: `sw/kas/image.yml`.
 
@@ -102,6 +102,10 @@ Reproduces: `sw/kas/image.yml`.
 
 Done when: `edf-linux-disk-image` builds, and you can name every file in `deploy/images/` that
 you will put on the board.
+Done in commit `3ae1098`. Pulled forward from Stage 6: a minimal `meta-zub1cg` layer whose
+bbappend drops `packagegroup-xilinx-gstreamer` (the ZU1CG has no VCU, and the group needs a
+`commercial` license flag). Also found that the fortran skip changes `gcc-cross`'s signature,
+which is why nearly every target recipe missed `sw/`'s sstate.
 
 ## Stage 5: Board machine and BOOT.BIN `[ ]`
 

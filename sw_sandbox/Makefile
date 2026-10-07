@@ -79,6 +79,9 @@ SSTATE_DIR    ?= $(HOME)/.cache/zub1cg-yocto/sstate-cache
 KAS_BASE      :=$(HERE)/kas/base.yml
 KAS_IMG       :=$(HERE)/kas/image.yml
 
+# overridable variables for debugging ease
+KAS_CFG ?= $(KAS_BASE):$(KAS_IMG)
+
 # from versions.env
 export KAS_IMAGE_VERSION
 export KAS_CONTAINER_IMAGE_DISTRO
@@ -218,7 +221,7 @@ kas-dirs:
 	@mkdir -p $(SSTATE_DIR)
 
 kas-shell: check-edf-version kas-dirs
-	kas-container shell $(KAS_BASE)
+	kas-container shell $(KAS_CFG)
 
 kas-lock: check-edf-version kas-dirs
 	kas-container lock --update $(KAS_BASE)
@@ -234,5 +237,5 @@ check-edf-version:
 	fi
 
 img-build: check-edf-version kas-dirs
-	kas-container build $(KAS_BASE):$(KAS_IMG)
+	kas-container build $(KAS_CFG)
 
