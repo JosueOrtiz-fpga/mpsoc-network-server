@@ -2,7 +2,6 @@ header:
   version: 14
 
 distro: amd-edf
-machine: amd-cortexa53-common
 
 local_conf_header:
   10-edf_template_flags: |
@@ -12,8 +11,6 @@ local_conf_header:
     #   This must be in local.conf (not distro conf) because HOSTTOOLS
     #   is global across all multiconfigs."""
     ROS_WORLD_SKIP_GROUPS:append = " fortran"
-    #
-    LICENSE_FLAGS_ACCEPTED += "xilinx"
     # Comment from EDF local.conf.sample template
     #
     # " Disk Space Monitoring during the build
@@ -40,8 +37,9 @@ defaults:
     branch: rel-v2026.1
 
 repos:
-
-
+  meta-zub1cg:
+    layers:
+      sw_sandbox/meta-zub1cg:
   poky:
     url: https://github.com/Xilinx/poky.git
     path: layers/poky
@@ -55,6 +53,7 @@ repos:
     path: layers/meta-amd-edf
     layers:
       .:
+      meta-amd-edf-bsp:
   amd-adaptive-socs-bsp:
     url: https://github.com/Xilinx/meta-amd-adaptive-socs.git
     path: layers/amd-adaptive-socs-bsp
@@ -123,7 +122,4 @@ repos:
     layers:
       meta-arm:
       meta-arm-toolchain:
-
-header:
-  version: 14
 

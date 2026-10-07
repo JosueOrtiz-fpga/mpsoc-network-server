@@ -71,7 +71,7 @@ Done when:
       reason for each. Kept: fortran skip, `xilinx` license flag, `BB_DISKMON_DIRS`
       (commit `17b9201`).
 
-## Stage 3: Reproducible, scripted builds `[ ]`
+## Stage 3: Reproducible, scripted builds `[x]`
 
 Reproduces: `sw/Makefile` (`kas-dirs`, `sw-shell`, `sw-lock`, `check-versions`) and
 `sw/kas/base.lock.yml`.
@@ -87,9 +87,9 @@ Reproduces: `sw/Makefile` (`kas-dirs`, `sw-shell`, `sw-lock`, `check-versions`) 
   to build `bootgen-native`).
 
 Done when: `make` targets open a shell and write a lock file, a second checkout resolves the
-same commits, and kas prints no "unsafe" warnings.
+same commits, and kas prints no "unsafe" warnings. Done in commits `6b9bf70` and `565c408`.
 
-## Stage 4: First generic image `[ ]`
+## Stage 4: First generic image `[~]`
 
 Reproduces: `sw/kas/image.yml`.
 

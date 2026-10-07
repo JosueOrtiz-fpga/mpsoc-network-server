@@ -105,3 +105,7 @@ Debugging layer dependency issues:
 ```
 bitbake-layers show-layers
 ```
+Checking sstate misses prior to building:
+```
+bitbake -S printdiff edf-linux-disk-image
+```
