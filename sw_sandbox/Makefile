@@ -160,7 +160,7 @@ distclean: clean
 sdt: $(XSA)
 	$(if $(XSA),,$(error XSA is empty: pass XSA=/path/to/design.xsa))
 	rm -rf $(SDT_DIR)
-	cd $(BUILD) && sdtgen -xsa $(XSA) -dir $(SDT_DIR)
+	cd $(BUILD) && sdtgen -xsa $(realpath $(XSA)) -dir $(SDT_DIR)
 
 
 #-----------------------------------

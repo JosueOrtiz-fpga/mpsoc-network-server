@@ -46,6 +46,15 @@ repos:
     layers:
       meta:
       meta-poky:
+  # must be same commit as meta-xilinx submodule copy
+  # only cloned for use as build tool
+  gen-machine-conf:
+    commit: cafa5303b4376309244dfbcf4d004f2730b59fbc
+    branch: xlnx_rel_v2026.1
+    url: https://github.com/Xilinx/gen-machine-conf.git
+    path: layers/gen-machine-conf
+    layers:
+      .: disabled
 
   # amd-edf and its dependencies
   meta-amd-edf:

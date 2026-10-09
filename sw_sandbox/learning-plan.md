@@ -107,7 +107,7 @@ bbappend drops `packagegroup-xilinx-gstreamer` (the ZU1CG has no VCU, and the gr
 `commercial` license flag). Also found that the fortran skip changes `gcc-cross`'s signature,
 which is why nearly every target recipe missed `sw/`'s sstate.
 
-## Stage 5: Board machine and BOOT.BIN `[ ]`
+## Stage 5: Board machine and BOOT.BIN `[~]`
 
 Reproduces: `make platform-machine` (`gen-machine.sh`, `platform/machine/`) and
 `sw/kas/bootbin.yml`.
@@ -121,6 +121,29 @@ Reproduces: `make platform-machine` (`gen-machine.sh`, `platform/machine/`) and
 
 Done when: a board-specific machine is generated from your own SDT and `xilinx-bootbin`
 produces a BOOT.BIN.
+
+### 5.1 Run gen-machine-conf by hand `[~]`
+
+- [x] Step 1: Make `gen-machine-conf` available. It is a git submodule of meta-xilinx, and kas
+      does not initialise submodules. Chose option (b): its own kas repo in `base.yml`, at the
+      commit the meta-xilinx submodule records.
+- [x] Step 2: Read `parse-sdt --help`. Find the options for the SDT dir, the output conf dir,
+      the `local.conf` fragment, the machine name and `-g`.
+- [x] Step 3: Generate into a scratch dir from `build/sdt`, without `-g`. Expect a BitBake run
+      for native tools, and possibly `EXDEV` (point `TMPDIR` into the build dir).
+- [~] Step 4: Study the output:
+  1. Every generated file and what it is for.
+  2. In the machine `.conf`: `BBMULTICONFIG`, `FSBL_MCDEPENDS`, `PMU_MCDEPENDS`,
+     `CONFIG_DTFILE`, `SYSTEM_DTFILE`, and what each links to.
+  3. The domain `.dts` files and which processor each is for.
+  4. The `-l` fragment: what it would add to `local.conf`, and which lines must not reach
+     the config `image.yml` shares.
+  5. Absolute paths in the output, and what breaks when the files move into a layer.
+
+### 5.2 Machine layer, bootbin.yml and BOOT.BIN `[ ]`
+
+Put the generated machine in a layer, write `kas/bootbin.yml`, and build `xilinx-bootbin`.
+Steps are set once 5.1 is done.
 
 ## Stage 6: Your own layer `[ ]`
 
